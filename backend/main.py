@@ -93,23 +93,35 @@ def update_schedule(elder_id: str, body: SchedulePayload):
 
 
 def _get_elder_id_from_scope(scope: dict) -> str | None:
-    qs = scope.get("query_string", b"").decode()
+    qs = scope.get("query_string") or b""
+    if isinstance(qs, bytes):
+        qs = qs.decode("utf-8")
     for part in qs.split("&"):
         if "=" in part:
             k, v = part.split("=", 1)
             if k == "elder_id":
-                return v
+                return v.strip()
     return None
 
 
 @app.websocket("/ws")
 async def websocket_session(websocket: WebSocket):
     """Live API session: load elder schedule, inject system prompt, proxy to Vertex AI."""
+    import logging
+    log = logging.getLogger("uvicorn.error")
+    log.info("WebSocket /ws connection attempt")
+    # Accept immediately so the client gets "connected"; then validate and run proxy
+    await websocket.accept()
+    log.info("WebSocket accepted")
     elder_id = _get_elder_id_from_scope(websocket.scope)
     if not elder_id:
-        await websocket.close(code=4000, reason="elder_id query param required")
+        log.warning("WebSocket: missing elder_id")
+        try:
+            await websocket.send_json({"error": "elder_id query param required"})
+            await websocket.close(code=4000, reason="elder_id required")
+        except Exception:
+            pass
         return
-    await websocket.accept()
     try:
         from live_session import run_live_proxy
         await run_live_proxy(websocket, elder_id, get_elder_schedule)

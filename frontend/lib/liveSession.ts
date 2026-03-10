@@ -90,29 +90,62 @@ export class LiveSession {
     }
 
     const url = `${this.backendUrl}/ws?elder_id=${encodeURIComponent(this.elderId)}`;
+    const CONNECT_TIMEOUT_MS = 15000;
+
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (err?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (err) {
+          this.callbacks.onStatus?.("error");
+          this.callbacks.onError?.(err.message);
+          reject(err);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        if (this.ws?.readyState === WebSocket.CONNECTING) {
+          this.ws.close();
+          this.ws = null;
+          settle(
+            new Error(
+              "Connection timed out. Make sure the backend is running (e.g. port 8080) and that nothing is blocking WebSocket connections."
+            )
+          );
+        }
+      }, CONNECT_TIMEOUT_MS);
+
       try {
         this.ws = new WebSocket(url);
       } catch (e) {
+        clearTimeout(timer);
         this.callbacks.onStatus?.("error");
         this.callbacks.onError?.("Could not open WebSocket. Check the backend URL.");
         reject(e);
         return;
       }
       this.ws.onopen = () => {
+        clearTimeout(timer);
+        if (settled) return;
+        settled = true;
         this.callbacks.onStatus?.("connected");
         resolve();
       };
       this.ws.onerror = () => {
-        this.callbacks.onStatus?.("error");
-        this.callbacks.onError?.(
-          `WebSocket failed at ${this.backendUrl}. Backend is up but the session endpoint failed — check backend logs.`
-        );
-        reject(new Error("WebSocket error"));
+        if (!settled) {
+          this.callbacks.onStatus?.("error");
+          this.callbacks.onError?.(
+            `WebSocket failed at ${this.backendUrl}. Backend is up but the session endpoint failed — check backend logs.`
+          );
+          settle(new Error("WebSocket error"));
+        }
       };
       this.ws.onclose = (ev) => {
+        clearTimeout(timer);
         this.callbacks.onStatus?.("disconnected");
-        if (ev.code !== 1000 && ev.code !== 1005) {
+        if (!settled && ev.code !== 1000 && ev.code !== 1005) {
           if (!this.errorShownFromMessage) {
             const reason =
               ev.reason ||
@@ -121,6 +154,7 @@ export class LiveSession {
                 : "Connection closed.");
             this.callbacks.onError?.(reason);
           }
+          settle(new Error(reason));
         }
       };
       this.ws.onmessage = (ev) => this.handleMessage(ev);

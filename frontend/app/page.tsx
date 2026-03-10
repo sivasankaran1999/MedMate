@@ -242,6 +242,9 @@ export default function Home() {
           <p className="text-center text-xs text-zinc-600 font-medium">
             Allow mic & camera when prompted. You can interrupt anytime.
           </p>
+          <p className="text-center text-xs text-zinc-600 mt-1" title="Backend for API and WebSocket">
+            Backend: {BACKEND_URL}
+          </p>
         </div>
       </div>
     </main>
