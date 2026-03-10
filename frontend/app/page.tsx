@@ -84,6 +84,7 @@ export default function Home() {
   const [imageSent, setImageSent] = useState(false);
   const [cameraOpening, setCameraOpening] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [liveVideoActive, setLiveVideoActive] = useState(false);
   const [session, setSession] = useState<LiveSession | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -106,6 +107,7 @@ export default function Home() {
     onImageSent: () => setImageSent(true),
     onCameraOpening: setCameraOpening,
     onCameraStream: setCameraStream,
+    onLiveVideoActive: setLiveVideoActive,
   };
 
   const connect = useCallback(() => {
@@ -133,6 +135,15 @@ export default function Home() {
     setError(null);
     setImageSent(false);
     session?.sendImageFromCamera();
+  }, [session]);
+
+  const startLiveVideo = useCallback(() => {
+    setError(null);
+    session?.startLiveVideoFeed();
+  }, [session]);
+
+  const stopLiveVideo = useCallback(() => {
+    session?.stopLiveVideoFeed();
   }, [session]);
 
   const isConnected = status === "connected";
@@ -244,18 +255,38 @@ export default function Home() {
                         aria-label="Camera preview"
                       />
                       <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
-                        Position pill or bottle, then we&apos;ll capture…
+                        {liveVideoActive ? "Sending live feed at 1 FPS…" : "Position pill or bottle, then we'll capture…"}
                       </p>
                     </div>
+                  )}
+                  {!liveVideoActive ? (
+                    <button
+                      type="button"
+                      onClick={startLiveVideo}
+                      disabled={cameraOpening}
+                      className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
+                      aria-label="Start live video feed"
+                    >
+                      {cameraOpening ? "Opening camera…" : "Start live video"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopLiveVideo}
+                      className="h-14 w-full rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-semibold text-lg shadow-lg shadow-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                      aria-label="Stop live video feed"
+                    >
+                      Stop live video
+                    </button>
                   )}
                   <button
                     type="button"
                     onClick={showPill}
-                    disabled={cameraOpening}
-                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
-                    aria-label="Show pill or bottle to camera"
+                    disabled={cameraOpening || liveVideoActive}
+                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-600 to-purple-700 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label="Show pill or bottle (single capture)"
                   >
-                    {cameraOpening ? "Opening camera… Allow if prompted" : "Show pill or bottle"}
+                    Show pill or bottle (single shot)
                   </button>
                   <button
                     type="button"

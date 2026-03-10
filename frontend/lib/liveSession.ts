@@ -58,6 +58,8 @@ export interface LiveSessionCallbacks {
   onCameraOpening?: (opening: boolean) => void;
   /** Called with the live stream so the UI can show a preview; called with null when done. */
   onCameraStream?: (stream: MediaStream | null) => void;
+  /** Called when live video feed starts or stops. */
+  onLiveVideoActive?: (active: boolean) => void;
 }
 
 export class LiveSession {
@@ -74,6 +76,10 @@ export class LiveSession {
   private elderId: string;
   /** Set when we already showed an error from a server message, so onclose doesn't overwrite it */
   private errorShownFromMessage = false;
+  /** Live video feed: interval and stream so we can stop. */
+  private liveVideoIntervalId: ReturnType<typeof setInterval> | null = null;
+  private liveVideoStream: MediaStream | null = null;
+  private liveVideoVideoEl: HTMLVideoElement | null = null;
 
   constructor(backendUrl: string, elderId: string, callbacks: LiveSessionCallbacks = {}) {
     this.backendUrl = backendUrl.replace(/^http/, "ws").replace(/\/$/, "");
@@ -392,8 +398,105 @@ export class LiveSession {
     );
   }
 
+  /** Start sending live video feed at ~1 FPS (per Vertex Live API recommendation). */
+  async startLiveVideoFeed(): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.callbacks.onError?.("Not connected. Start a session first.");
+      return;
+    }
+    if (this.liveVideoIntervalId != null) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.callbacks.onError?.("Camera not supported. Use HTTPS or localhost.");
+      return;
+    }
+    this.callbacks.onCameraOpening?.(true);
+    this.callbacks.onCameraStream?.(null);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+    } catch (e) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (e2) {
+        this.callbacks.onCameraOpening?.(false);
+        this.callbacks.onError?.("Camera access denied or not found.");
+        return;
+      }
+    }
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => video.play().then(resolve).catch(reject);
+        video.onerror = () => reject(new Error("Video load failed"));
+        setTimeout(() => reject(new Error("Timeout")), 5000);
+      });
+      await new Promise<void>((r) => {
+        if (video.readyState >= 2) r();
+        else video.onloadeddata = () => r();
+        setTimeout(r, 500);
+      });
+    } catch (e) {
+      this.callbacks.onCameraOpening?.(false);
+      stream.getTracks().forEach((t) => t.stop());
+      this.callbacks.onError?.("Camera stream failed.");
+      return;
+    }
+    this.liveVideoStream = stream;
+    this.liveVideoVideoEl = video;
+    this.callbacks.onCameraStream?.(stream);
+    this.callbacks.onCameraOpening?.(false);
+    this.callbacks.onLiveVideoActive?.(true);
+
+    const LIVE_FPS_INTERVAL_MS = 1000;
+    this.liveVideoIntervalId = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.liveVideoVideoEl) return;
+      const v = this.liveVideoVideoEl;
+      if (v.readyState < 2 || v.videoWidth === 0) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = v.videoWidth;
+      canvas.height = v.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(v, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = (reader.result as string)?.split(",")[1];
+            if (base64) this.send({ realtime_input: { media_chunks: [{ mime_type: "image/jpeg", data: base64 }] } });
+          };
+          reader.readAsDataURL(blob);
+        },
+        "image/jpeg",
+        0.85
+      );
+    }, LIVE_FPS_INTERVAL_MS);
+  }
+
+  stopLiveVideoFeed(): void {
+    if (this.liveVideoIntervalId != null) {
+      clearInterval(this.liveVideoIntervalId);
+      this.liveVideoIntervalId = null;
+    }
+    if (this.liveVideoStream) {
+      this.liveVideoStream.getTracks().forEach((t) => t.stop());
+      this.liveVideoStream = null;
+    }
+    this.liveVideoVideoEl = null;
+    this.callbacks.onCameraStream?.(null);
+    this.callbacks.onLiveVideoActive?.(false);
+  }
+
   disconnect(): void {
     this.stopMic();
+    this.stopLiveVideoFeed();
     this.ws?.close();
     this.ws = null;
     this.playbackNode?.port.postMessage("interrupt");
