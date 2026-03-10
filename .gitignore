@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.pyo
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+backend/service-account.json
+
+# Build and output
+.next/
+out/
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs and debug
+*.log
+npm-debug.log*
+.cache/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
