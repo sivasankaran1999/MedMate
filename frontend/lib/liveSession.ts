@@ -24,17 +24,27 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function base64ToFloat32(base64: string): Float32Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  // PCM 16-bit: need an even number of bytes (Int16Array requires buffer length % 2 === 0)
+/** Decode PCM 16-bit little-endian bytes to float32 at 24kHz (API spec). */
+function pcmBytesToFloat32LE(bytes: Uint8Array): Float32Array {
   const evenByteLength = bytes.length - (bytes.length % 2);
   if (evenByteLength === 0) return new Float32Array(0);
-  const int16 = new Int16Array(bytes.buffer.slice(0, evenByteLength));
+  const slice = bytes.subarray(0, evenByteLength);
+  const int16 = new Int16Array(slice.buffer, slice.byteOffset, slice.length / 2);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
   return float32;
+}
+
+function base64ToFloat32LE(base64: string): Float32Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return pcmBytesToFloat32LE(bytes);
+}
+
+// API spec: 24kHz, 16-bit PCM little-endian
+function base64ToFloat32(base64: string): Float32Array {
+  return base64ToFloat32LE(base64);
 }
 
 export type SessionStatus = "disconnected" | "connecting" | "connected" | "error";
@@ -45,6 +55,9 @@ export interface LiveSessionCallbacks {
   onVoiceState?: (state: VoiceState) => void;
   onError?: (message: string) => void;
   onImageSent?: () => void;
+  onCameraOpening?: (opening: boolean) => void;
+  /** Called with the live stream so the UI can show a preview; called with null when done. */
+  onCameraStream?: (stream: MediaStream | null) => void;
 }
 
 export class LiveSession {
@@ -163,13 +176,7 @@ export class LiveSession {
 
   private handleMessage(ev: MessageEvent): void {
     if (ev.data instanceof Blob) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        if (base64) this.playAudioChunk(base64);
-      };
-      reader.readAsDataURL(ev.data);
-      return;
+      return; // Backend sends only JSON (binary frames decoded to JSON); no Blob audio
     }
     try {
       const msg = JSON.parse(ev.data as string);
@@ -178,24 +185,26 @@ export class LiveSession {
         this.callbacks.onError?.(msg.error);
         return;
       }
-      if (msg.setupComplete != null) {
+      if (msg.setupComplete != null || msg.setup_complete != null) {
         // Ready for input
       }
-      const sc = msg.serverContent;
+      const sc = msg.serverContent ?? msg.server_content;
       if (sc) {
         if (sc.interrupted) {
-        this.playbackNode?.port.postMessage("interrupt");
-        this.callbacks.onVoiceState?.("idle");
-      }
-        if (sc.modelTurn?.parts?.length) {
+          this.playbackNode?.port.postMessage("interrupt");
+          this.callbacks.onVoiceState?.("idle");
+        }
+        const modelTurn = sc.modelTurn ?? sc.model_turn;
+        const parts = modelTurn?.parts;
+        if (parts?.length) {
           this.callbacks.onVoiceState?.("speaking");
-          for (const part of sc.modelTurn.parts) {
-            if (part?.inlineData?.data) {
-              this.playAudioChunk(part.inlineData.data);
-            }
+          for (const part of parts) {
+            const inlineData = part?.inlineData ?? part?.inline_data;
+            const data = inlineData?.data;
+            if (data) this.playAudioChunk(data);
           }
         }
-        if (sc.turnComplete) this.callbacks.onVoiceState?.("idle");
+        if (sc.turnComplete ?? sc.turn_complete) this.callbacks.onVoiceState?.("idle");
       }
     } catch {
       // ignore parse errors
@@ -208,11 +217,20 @@ export class LiveSession {
     }
   }
 
-  private playAudioChunk(base64: string): void {
+  private playAudioChunk(data: string | number[] | Uint8Array): void {
     if (typeof window === "undefined") return;
     this.initPlayback().then(() => {
       if (!this.playbackNode) return;
-      const float32 = base64ToFloat32(base64);
+      let float32: Float32Array;
+      if (typeof data === "string") {
+        float32 = base64ToFloat32(data);
+      } else if (Array.isArray(data)) {
+        float32 = pcmBytesToFloat32LE(new Uint8Array(data));
+      } else if (data instanceof Uint8Array) {
+        float32 = pcmBytesToFloat32LE(data);
+      } else {
+        return;
+      }
       if (float32.length === 0) return;
       this.playbackNode.port.postMessage(float32);
     });
@@ -273,40 +291,90 @@ export class LiveSession {
   }
 
   async sendImageFromCamera(): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.callbacks.onError?.("Not connected. Start a session first.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.callbacks.onError?.(
+        "Camera not supported in this browser. Use HTTPS or localhost and a modern browser (Chrome, Safari, Edge)."
+      );
+      return;
+    }
+    this.callbacks.onCameraOpening?.(true);
+    this.callbacks.onCameraStream?.(null);
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } });
-    } catch {
+      // Request video without facingMode so Mac/laptop camera works (environment = back camera, often fails on desktop)
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+    } catch (e) {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      } catch (e) {
-        this.callbacks.onError?.("Camera not available. Please allow camera access.");
+      } catch (e2) {
+        this.callbacks.onCameraOpening?.(false);
+        const err = (e2 ?? e) as DOMException & { message?: string };
+        const name = err?.name ?? "";
+        const msg = err?.message ?? String(e2 ?? e);
+        if (name === "NotAllowedError" || msg.includes("Permission") || msg.includes("denied")) {
+          this.callbacks.onError?.(
+            "Camera access denied. Click “Show pill or bottle” again and choose Allow when the browser asks. On Mac: System Settings → Privacy & Security → Camera → enable for this browser."
+          );
+        } else if (name === "NotFoundError" || msg.includes("not found")) {
+          this.callbacks.onError?.("No camera found. Connect a camera and try again.");
+        } else {
+          this.callbacks.onError?.(`Camera error: ${msg || name || "unknown"}. Use localhost or HTTPS.`);
+        }
         return;
       }
     }
+    // Show stream in UI so user sees camera is on and can allow permission if prompted
+    this.callbacks.onCameraStream?.(stream);
     const video = document.createElement("video");
     video.srcObject = stream;
     video.muted = true;
     video.playsInline = true;
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => {
-        video.play().then(resolve).catch(reject);
-      };
-      video.onerror = () => reject(new Error("Video load failed"));
-    });
+    video.autoplay = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => {
+          video.play().then(resolve).catch(reject);
+        };
+        video.onerror = () => reject(new Error("Video load failed"));
+      });
+      // Wait for the camera to deliver a real frame (avoid black frame)
+      await new Promise<void>((resolve) => {
+        if (video.readyState >= 2) {
+          resolve();
+          return;
+        }
+        video.onloadeddata = () => resolve();
+        setTimeout(resolve, 300);
+      });
+    } catch (e) {
+      this.callbacks.onCameraStream?.(null);
+      this.callbacks.onCameraOpening?.(false);
+      stream.getTracks().forEach((t) => t.stop());
+      this.callbacks.onError?.("Camera stream failed. Please allow camera access and try again.");
+      return;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
+      this.callbacks.onCameraStream?.(null);
+      this.callbacks.onCameraOpening?.(false);
       stream.getTracks().forEach((t) => t.stop());
       return;
     }
     ctx.drawImage(video, 0, 0);
+    this.callbacks.onCameraStream?.(null);
     stream.getTracks().forEach((t) => t.stop());
     canvas.toBlob(
       (blob) => {
+        this.callbacks.onCameraOpening?.(false);
         if (!blob) return;
         const reader = new FileReader();
         reader.onloadend = () => {

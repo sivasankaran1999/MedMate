@@ -99,6 +99,7 @@ async def run_live_proxy(
     model_uri = f"projects/{project}/locations/us-central1/publishers/google/models/{LIVE_MODEL}"
     system_instruction = build_system_instruction(schedule)
 
+    # Match official Google demo: snake_case (generation_config, response_modalities, etc.)
     setup_message = {
         "setup": {
             "model": model_uri,
@@ -139,11 +140,38 @@ async def run_live_proxy(
                 try:
                     async for raw in vertex_ws:
                         if isinstance(raw, bytes):
-                            await client_ws.send_bytes(raw)
+                            # Vertex may send JSON as a binary frame; decode and forward as text so client gets JSON with base64 audio
+                            try:
+                                msg = json.loads(raw.decode("utf-8"))
+                                if msg.get("setupComplete") is not None:
+                                    setup_done = True
+                                sc = msg.get("serverContent") or msg.get("server_content")
+                                if sc:
+                                    mt = sc.get("modelTurn") or sc.get("model_turn")
+                                    parts = (mt or {}).get("parts") or []
+                                    has_audio = any(
+                                        (p.get("inlineData") or p.get("inline_data") or {}).get("data")
+                                        for p in parts
+                                    )
+                                    if has_audio:
+                                        print("[MedMate] Audio in JSON (from binary frame): %d parts" % len(parts))
+                                await client_ws.send_text(json.dumps(msg))
+                            except (UnicodeDecodeError, json.JSONDecodeError):
+                                pass  # skip non-JSON binary
                         else:
                             msg = json.loads(raw) if isinstance(raw, str) else raw
                             if msg.get("setupComplete") is not None:
                                 setup_done = True
+                            sc = msg.get("serverContent") or msg.get("server_content")
+                            if sc:
+                                mt = sc.get("modelTurn") or sc.get("model_turn")
+                                parts = (mt or {}).get("parts") or []
+                                has_audio = any(
+                                    (p.get("inlineData") or p.get("inline_data") or {}).get("data")
+                                    for p in parts
+                                )
+                                if has_audio:
+                                    print("[MedMate] Audio in JSON: %d parts" % len(parts))
                             await client_ws.send_text(json.dumps(msg))
                 except (ConnectionClosed, Exception):
                     pass

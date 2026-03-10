@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LiveSession,
   type LiveSessionCallbacks,
@@ -82,7 +82,19 @@ export default function Home() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [imageSent, setImageSent] = useState(false);
+  const [cameraOpening, setCameraOpening] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [session, setSession] = useState<LiveSession | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = cameraVideoRef.current;
+    if (!video || !cameraStream) return;
+    video.srcObject = cameraStream;
+    return () => {
+      video.srcObject = null;
+    };
+  }, [cameraStream]);
 
   const callbacks: LiveSessionCallbacks = {
     onStatus: setStatus,
@@ -92,6 +104,8 @@ export default function Home() {
       setStatus("error");
     },
     onImageSent: () => setImageSent(true),
+    onCameraOpening: setCameraOpening,
+    onCameraStream: setCameraStream,
   };
 
   const connect = useCallback(() => {
@@ -116,6 +130,7 @@ export default function Home() {
   }, [session]);
 
   const showPill = useCallback(() => {
+    setError(null);
     setImageSent(false);
     session?.sendImageFromCamera();
   }, [session]);
@@ -218,13 +233,29 @@ export default function Home() {
                       ? "Stop microphone"
                       : "Start microphone"}
                   </button>
+                  {cameraStream && (
+                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
+                      <video
+                        ref={cameraVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        aria-label="Camera preview"
+                      />
+                      <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
+                        Position pill or bottle, then we&apos;ll capture…
+                      </p>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={showPill}
-                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                    disabled={cameraOpening}
+                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
                     aria-label="Show pill or bottle to camera"
                   >
-                    Show pill or bottle
+                    {cameraOpening ? "Opening camera… Allow if prompted" : "Show pill or bottle"}
                   </button>
                   <button
                     type="button"
