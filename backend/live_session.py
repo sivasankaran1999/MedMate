@@ -4,10 +4,13 @@ Vertex AI Gemini Live API proxy: inject MedMate system prompt + elder schedule, 
 
 import asyncio
 import json
+import logging
 import os
 from typing import Any
 
 import google.auth
+
+logger = logging.getLogger(__name__)
 import google.auth.transport.requests
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -71,10 +74,26 @@ async def run_live_proxy(
     try:
         schedule = get_schedule_fn(elder_id)
     except Exception as e:
-        await client_ws.send_json({"error": f"Could not load schedule: {e}"})
+        err_msg = f"Could not load schedule: {e}"
+        logger.exception("Could not load schedule for elder_id=%s", elder_id)
+        try:
+            await client_ws.send_json({"error": err_msg})
+            await client_ws.close(code=4000, reason=err_msg[:123])
+        except Exception:
+            pass
         return
 
-    token = get_access_token()
+    try:
+        token = get_access_token()
+    except Exception as e:
+        err_msg = f"Auth failed: {e}"
+        logger.exception("get_access_token failed")
+        try:
+            await client_ws.send_json({"error": err_msg})
+            await client_ws.close(code=4010, reason=err_msg[:123])
+        except Exception:
+            pass
+        return
     url = f"wss://{LIVE_API_HOST}{LIVE_API_PATH}"
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
     model_uri = f"projects/{project}/locations/us-central1/publishers/google/models/{LIVE_MODEL}"
@@ -151,7 +170,10 @@ async def run_live_proxy(
                 asyncio.create_task(client_to_vertex()),
             )
     except Exception as e:
+        err_msg = str(e)
+        logger.exception("Vertex Live API connection or proxy failed")
         try:
-            await client_ws.send_json({"error": str(e)})
+            await client_ws.send_json({"error": err_msg})
+            await client_ws.close(code=4010, reason=err_msg[:123])
         except Exception:
             pass

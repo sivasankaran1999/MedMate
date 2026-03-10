@@ -9,12 +9,15 @@ Cloud Run service that proxies to Vertex AI Gemini Live API and reads elder sche
 
 ## Run locally
 
+Use the project virtual environment (recommended):
+
 ```bash
 cd backend
+python3 -m venv .venv          # only first time
+source .venv/bin/activate      # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 export GOOGLE_CLOUD_PROJECT=your-project-id
-# Optional, for Firestore/Vertex from your machine:
-# export GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
+# If using ADC (no key file): gcloud auth application-default login first
 uvicorn main:app --reload --port 8080
 ```
 

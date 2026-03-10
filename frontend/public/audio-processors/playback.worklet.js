@@ -26,7 +26,10 @@ class PCMProcessor extends AudioWorkletProcessor {
         continue;
       }
       const toCopy = Math.min(channel.length - outIdx, buf.length);
-      channel.set(buf.subarray(0, toCopy), outIdx);
+      for (let i = 0; i < toCopy; i++) {
+        const s = buf[i];
+        channel[outIdx + i] = Math.max(-1, Math.min(1, s));
+      }
       outIdx += toCopy;
       if (toCopy >= buf.length) this.audioQueue.shift();
       else this.audioQueue[0] = buf.subarray(toCopy);

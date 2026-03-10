@@ -38,6 +38,44 @@ function voiceLabel(v: VoiceState): string {
   }
 }
 
+function StatusPill({
+  status,
+  voiceState,
+}: {
+  status: SessionStatus;
+  voiceState: VoiceState;
+}) {
+  const isLive = status === "connected";
+  const isError = status === "error";
+  const isConnecting = status === "connecting";
+  const isListening = voiceState === "listening";
+  const isSpeaking = voiceState === "speaking";
+
+  const dotColor = isError
+    ? "bg-red-500"
+    : isListening
+      ? "bg-amber-400 animate-pulse-soft"
+      : isSpeaking
+        ? "bg-cyan-400 animate-pulse-soft"
+        : isLive
+          ? "bg-emerald-400"
+          : isConnecting
+            ? "bg-cyan-400 animate-pulse-soft"
+            : "bg-zinc-500";
+
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-4 py-2 backdrop-blur-sm">
+      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+      <span className="text-sm font-medium text-zinc-300">
+        {statusLabel(status)}
+        {voiceState !== "idle" && (
+          <span className="text-zinc-500"> · {voiceLabel(voiceState)}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [elderId, setElderId] = useState(DEFAULT_ELDER_ID);
   const [status, setStatus] = useState<SessionStatus>("disconnected");
@@ -85,103 +123,126 @@ export default function Home() {
   const isConnected = status === "connected";
 
   return (
-    <main className="min-h-screen bg-[#f0f4f8] text-[#1a365d] flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-md flex flex-col gap-8">
-        <header className="text-center">
-          <h1 className="text-2xl font-semibold text-[#2c5282] tracking-tight">
-            MedMate
-          </h1>
-          <p className="mt-1 text-base text-[#4a5568]">
-            Voice-first companion for your medications
-          </p>
-        </header>
+    <main className="min-h-screen relative overflow-hidden">
+      {/* Background */}
+      <div className="absolute inset-0 bg-[#0a0a0f]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(34,211,238,0.15),transparent)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_80%_50%,rgba(139,92,246,0.08),transparent)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_0%,rgba(10,10,15,0.8)_70%)]" />
 
-        <section className="bg-white rounded-2xl shadow-sm border border-[#e2e8f0] p-6 space-y-5">
-          <div>
-            <label
-              htmlFor="elder-id"
-              className="block text-sm font-medium text-[#4a5568] mb-2"
-            >
-              Who is using MedMate?
-            </label>
-            <select
-              id="elder-id"
-              value={elderId}
-              onChange={(e) => setElderId(e.target.value)}
-              disabled={isConnected}
-              className="w-full min-h-[48px] px-4 rounded-xl border border-[#cbd5e0] text-base bg-white text-[#1a365d] focus:outline-none focus:ring-2 focus:ring-[#4299e1] focus:border-transparent disabled:opacity-60"
-              aria-label="Select profile"
-            >
-              <option value="elder-demo">Demo Elder</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-[#4a5568]">
-              Status: {statusLabel(status)}
-              {voiceState !== "idle" && ` · ${voiceLabel(voiceState)}`}
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 sm:p-8">
+        <div className="w-full max-w-lg flex flex-col gap-10">
+          {/* Header */}
+          <header className="text-center space-y-2">
+            <h1 className="text-4xl sm:text-5xl font-bold tracking-tight bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
+              MedMate
+            </h1>
+            <p className="text-zinc-500 text-sm sm:text-base font-medium">
+              Voice + vision. One session.
             </p>
-            {error && (
-              <p className="text-sm text-[#c53030] bg-[#fff5f5] p-3 rounded-lg" role="alert">
-                {error}
-              </p>
-            )}
-            {imageSent && (
-              <p className="text-sm text-[#276749] bg-[#f0fff4] p-3 rounded-lg">
-                Image sent. MedMate is looking at it.
-              </p>
-            )}
-          </div>
+          </header>
 
-          <div className="flex flex-col gap-4 pt-2">
-            {!isConnected ? (
-              <button
-                type="button"
-                onClick={connect}
-                className="min-h-[48px] w-full rounded-xl bg-[#2b6cb0] text-white font-medium text-lg shadow-sm hover:bg-[#2c5282] focus:outline-none focus:ring-2 focus:ring-[#4299e1] focus:ring-offset-2 active:scale-[0.98] transition"
-                aria-label="Start session"
+          {/* Main card */}
+          <section className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 shadow-2xl shadow-black/20 space-y-6">
+            {/* Profile */}
+            <div>
+              <label
+                htmlFor="elder-id"
+                className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2"
               >
-                Start session
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={voiceState === "listening" ? stopMic : startMic}
-                  className="min-h-[48px] w-full rounded-xl font-medium text-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 active:scale-[0.98] transition disabled:opacity-60"
-                  style={{
-                    backgroundColor: voiceState === "listening" ? "#c53030" : "#2f855a",
-                    color: "white",
-                  }}
-                  aria-label={voiceState === "listening" ? "Stop microphone" : "Start microphone"}
-                  aria-pressed={voiceState === "listening"}
-                >
-                  {voiceState === "listening" ? "Stop microphone" : "Start microphone"}
-                </button>
-                <button
-                  type="button"
-                  onClick={showPill}
-                  className="min-h-[48px] w-full rounded-xl bg-[#805ad5] text-white font-medium text-lg shadow-sm hover:bg-[#6b46c1] focus:outline-none focus:ring-2 focus:ring-[#9f7aea] focus:ring-offset-2 active:scale-[0.98] transition"
-                  aria-label="Show pill or bottle to camera"
-                >
-                  Show pill or bottle
-                </button>
-                <button
-                  type="button"
-                  onClick={disconnect}
-                  className="min-h-[48px] w-full rounded-xl border-2 border-[#cbd5e0] text-[#4a5568] font-medium text-lg hover:bg-[#edf2f7] focus:outline-none focus:ring-2 focus:ring-[#a0aec0] focus:ring-offset-2 active:scale-[0.98] transition"
-                  aria-label="End session"
-                >
-                  End session
-                </button>
-              </>
-            )}
-          </div>
-        </section>
+                Profile
+              </label>
+              <select
+                id="elder-id"
+                value={elderId}
+                onChange={(e) => setElderId(e.target.value)}
+                disabled={isConnected}
+                className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 disabled:opacity-50 transition-all cursor-pointer"
+                aria-label="Select profile"
+              >
+                <option value="elder-demo" className="bg-zinc-900 text-white">
+                  Demo Elder
+                </option>
+              </select>
+            </div>
 
-        <p className="text-center text-sm text-[#718096]">
-          Allow microphone and camera when asked. You can interrupt MedMate anytime.
-        </p>
+            {/* Status */}
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill status={status} voiceState={voiceState} />
+              </div>
+              {error && (
+                <div
+                  className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400 font-medium"
+                  role="alert"
+                >
+                  {error}
+                </div>
+              )}
+              {imageSent && (
+                <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm text-emerald-400 font-medium">
+                  Image sent. MedMate is looking at it.
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-3 pt-2">
+              {!isConnected ? (
+                <button
+                  type="button"
+                  onClick={connect}
+                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                  aria-label="Start session"
+                >
+                  Start session
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={voiceState === "listening" ? stopMic : startMic}
+                    className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
+                      voiceState === "listening"
+                        ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
+                        : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
+                    }`}
+                    aria-label={
+                      voiceState === "listening"
+                        ? "Stop microphone"
+                        : "Start microphone"
+                    }
+                    aria-pressed={voiceState === "listening"}
+                  >
+                    {voiceState === "listening"
+                      ? "Stop microphone"
+                      : "Start microphone"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={showPill}
+                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                    aria-label="Show pill or bottle to camera"
+                  >
+                    Show pill or bottle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                    aria-label="End session"
+                  >
+                    End session
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+
+          <p className="text-center text-xs text-zinc-600 font-medium">
+            Allow mic & camera when prompted. You can interrupt anytime.
+          </p>
+        </div>
       </div>
     </main>
   );

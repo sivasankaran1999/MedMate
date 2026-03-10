@@ -30,16 +30,31 @@ See **[TECH_STACK.md](./TECH_STACK.md)** and **[docs/architecture.md](./docs/arc
 - **Python** 3.11+
 - **Google Cloud project** with billing, and:
   - Vertex AI API, Cloud Run API, Firestore API enabled
-  - A service account with **Vertex AI User** and **Firestore** (e.g. Cloud Datastore User) roles
-  - Service account JSON key saved as `backend/service-account.json` (do not commit; it is in `.gitignore`)
+  - For **local auth**, use one of:
+    - **Option A (no key file):** [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) — run `gcloud auth application-default login` (works when your org blocks service account key creation).
+    - **Option B:** A service account with **Vertex AI User** and **Cloud Datastore User** roles, and its JSON key at `backend/service-account.json` (do not commit; in `.gitignore`).
 
 ### 1. Backend
+
+**If your org blocks service account keys**, use Application Default Credentials (no key file):
+
+```bash
+gcloud auth application-default login
+gcloud config set project YOUR_GCP_PROJECT_ID
+cd backend
+pip install -r requirements.txt
+export GOOGLE_CLOUD_PROJECT=YOUR_GCP_PROJECT_ID
+# Do NOT set GOOGLE_APPLICATION_CREDENTIALS — ADC from gcloud will be used
+uvicorn main:app --reload --port 8080
+```
+
+**If you have a service account JSON key** (e.g. personal project or key allowed):
 
 ```bash
 cd backend
 pip install -r requirements.txt
 export GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-export GOOGLE_APPLICATION_CREDENTIALS=./service-account.json   # optional for local
+export GOOGLE_APPLICATION_CREDENTIALS="$PWD/service-account.json"
 uvicorn main:app --reload --port 8080
 ```
 

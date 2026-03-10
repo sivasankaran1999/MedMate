@@ -28,7 +28,10 @@ function base64ToFloat32(base64: string): Float32Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const int16 = new Int16Array(bytes.buffer);
+  // PCM 16-bit: need an even number of bytes (Int16Array requires buffer length % 2 === 0)
+  const evenByteLength = bytes.length - (bytes.length % 2);
+  if (evenByteLength === 0) return new Float32Array(0);
+  const int16 = new Int16Array(bytes.buffer.slice(0, evenByteLength));
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
   return float32;
@@ -56,6 +59,8 @@ export class LiveSession {
   private callbacks: LiveSessionCallbacks;
   private backendUrl: string;
   private elderId: string;
+  /** Set when we already showed an error from a server message, so onclose doesn't overwrite it */
+  private errorShownFromMessage = false;
 
   constructor(backendUrl: string, elderId: string, callbacks: LiveSessionCallbacks = {}) {
     this.backendUrl = backendUrl.replace(/^http/, "ws").replace(/\/$/, "");
@@ -64,14 +69,33 @@ export class LiveSession {
   }
 
   async connect(): Promise<void> {
+    this.errorShownFromMessage = false;
     this.callbacks.onStatus?.("connecting");
+
+    const httpBase = this.backendUrl.replace(/^ws/, "http");
+    let healthOk = false;
+    try {
+      const res = await fetch(`${httpBase}/health`, { method: "GET" });
+      healthOk = res.ok;
+    } catch {
+      // fetch failed: backend unreachable (not running, wrong host, or network)
+    }
+
+    if (!healthOk) {
+      this.callbacks.onStatus?.("error");
+      this.callbacks.onError?.(
+        `Backend not reachable at ${httpBase}. Start it with: cd backend && uvicorn main:app --reload --port 8080`
+      );
+      return Promise.reject(new Error("Backend not reachable"));
+    }
+
     const url = `${this.backendUrl}/ws?elder_id=${encodeURIComponent(this.elderId)}`;
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(url);
       } catch (e) {
         this.callbacks.onStatus?.("error");
-        this.callbacks.onError?.("Could not connect. Check the backend URL.");
+        this.callbacks.onError?.("Could not open WebSocket. Check the backend URL.");
         reject(e);
         return;
       }
@@ -81,13 +105,22 @@ export class LiveSession {
       };
       this.ws.onerror = () => {
         this.callbacks.onStatus?.("error");
-        this.callbacks.onError?.("Connection error.");
+        this.callbacks.onError?.(
+          `WebSocket failed at ${this.backendUrl}. Backend is up but the session endpoint failed — check backend logs.`
+        );
         reject(new Error("WebSocket error"));
       };
       this.ws.onclose = (ev) => {
         this.callbacks.onStatus?.("disconnected");
         if (ev.code !== 1000 && ev.code !== 1005) {
-          this.callbacks.onError?.(ev.reason || "Connection closed.");
+          if (!this.errorShownFromMessage) {
+            const reason =
+              ev.reason ||
+              (ev.code === 4000 || ev.code === 4010
+                ? "Backend reported an error. Check the terminal where uvicorn is running for the real message."
+                : "Connection closed.");
+            this.callbacks.onError?.(reason);
+          }
         }
       };
       this.ws.onmessage = (ev) => this.handleMessage(ev);
@@ -107,6 +140,7 @@ export class LiveSession {
     try {
       const msg = JSON.parse(ev.data as string);
       if (msg.error) {
+        this.errorShownFromMessage = true;
         this.callbacks.onError?.(msg.error);
         return;
       }
@@ -120,10 +154,11 @@ export class LiveSession {
         this.callbacks.onVoiceState?.("idle");
       }
         if (sc.modelTurn?.parts?.length) {
-          const part = sc.modelTurn.parts[0];
-          if (part?.inlineData?.data) {
-            this.callbacks.onVoiceState?.("speaking");
-            this.playAudioChunk(part.inlineData.data);
+          this.callbacks.onVoiceState?.("speaking");
+          for (const part of sc.modelTurn.parts) {
+            if (part?.inlineData?.data) {
+              this.playAudioChunk(part.inlineData.data);
+            }
           }
         }
         if (sc.turnComplete) this.callbacks.onVoiceState?.("idle");
@@ -144,6 +179,7 @@ export class LiveSession {
     this.initPlayback().then(() => {
       if (!this.playbackNode) return;
       const float32 = base64ToFloat32(base64);
+      if (float32.length === 0) return;
       this.playbackNode.port.postMessage(float32);
     });
   }

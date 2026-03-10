@@ -1,6 +1,19 @@
 """MedMate backend - Cloud Run service for Vertex AI Live API proxy and Firestore."""
 
 import os
+
+# Use certifi's CA bundle for SSL (fixes CERTIFICATE_VERIFY_FAILED on macOS and some environments)
+import certifi
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+
+# Load .env from backend directory (and .env.example if .env is missing)
+from pathlib import Path
+from dotenv import load_dotenv
+_backend_dir = Path(__file__).resolve().parent
+load_dotenv(_backend_dir / ".env")
+load_dotenv(_backend_dir / ".env.example")  # fallback if .env doesn't exist
+
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -103,7 +116,11 @@ async def websocket_session(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
+        err_msg = str(e)
+        import logging
+        logging.getLogger("uvicorn.error").exception("WebSocket session error")
         try:
-            await websocket.send_json({"error": str(e)})
+            await websocket.send_json({"error": err_msg})
+            await websocket.close(code=4010, reason=err_msg[:123])
         except Exception:
             pass
