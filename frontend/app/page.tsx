@@ -81,7 +81,6 @@ export default function Home() {
   const [status, setStatus] = useState<SessionStatus>("disconnected");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [imageSent, setImageSent] = useState(false);
   const [cameraOpening, setCameraOpening] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [liveVideoActive, setLiveVideoActive] = useState(false);
@@ -104,7 +103,6 @@ export default function Home() {
       setError(msg);
       setStatus("error");
     },
-    onImageSent: () => setImageSent(true),
     onCameraOpening: setCameraOpening,
     onCameraStream: setCameraStream,
     onLiveVideoActive: setLiveVideoActive,
@@ -112,7 +110,6 @@ export default function Home() {
 
   const connect = useCallback(() => {
     setError(null);
-    setImageSent(false);
     const s = new LiveSession(BACKEND_URL, elderId, callbacks);
     setSession(s);
     s.connect().catch(() => {});
@@ -129,12 +126,6 @@ export default function Home() {
 
   const stopMic = useCallback(() => {
     session?.stopMic();
-  }, [session]);
-
-  const showPill = useCallback(() => {
-    setError(null);
-    setImageSent(false);
-    session?.sendImageFromCamera();
   }, [session]);
 
   const startLiveVideo = useCallback(() => {
@@ -203,11 +194,6 @@ export default function Home() {
                   role="alert"
                 >
                   {error}
-                </div>
-              )}
-              {imageSent && (
-                <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm text-emerald-400 font-medium">
-                  Image sent. MedMate is looking at it.
                 </div>
               )}
             </div>
@@ -279,15 +265,6 @@ export default function Home() {
                       Stop live video
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={showPill}
-                    disabled={cameraOpening || liveVideoActive}
-                    className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-600 to-purple-700 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Show pill or bottle (single capture)"
-                  >
-                    Show pill or bottle (single shot)
-                  </button>
                   <button
                     type="button"
                     onClick={disconnect}
