@@ -40,6 +40,7 @@ GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"
 class MedEntry(BaseModel):
     name: str
     strength: str | None = None
+    quantity: int | None = None  # e.g. 2 = "take 2 tablets"
 
 
 class SchedulePayload(BaseModel):
@@ -104,6 +105,7 @@ class RegisterPayload(BaseModel):
     email: str
     password: str
     display_name: str | None = None
+    time_windows: dict[str, Any] | None = None  # e.g. {"morning": {"start": "10:00", "end": "12:00"}, ...}
 
 
 @app.post("/auth/register")
@@ -112,9 +114,18 @@ def register(body: RegisterPayload):
     if get_user_by_email(body.email):
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
     elder_id = _email_to_elder_id(body.email)
+    schedule = dict(DEFAULT_EMPTY_SCHEDULE)
+    if body.time_windows and isinstance(body.time_windows, dict):
+        default_tw = schedule["timeWindows"]
+        tw = dict(default_tw)
+        for slot in ("morning", "afternoon", "night"):
+            v = body.time_windows.get(slot)
+            if isinstance(v, dict) and v.get("start") and v.get("end"):
+                tw[slot] = {"start": str(v["start"]), "end": str(v["end"])}
+        schedule["timeWindows"] = tw
     set_elder_schedule(
         elder_id,
-        DEFAULT_EMPTY_SCHEDULE,
+        schedule,
         display_name=body.display_name or body.email.split("@")[0],
         language="en",
     )

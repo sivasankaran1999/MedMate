@@ -79,7 +79,7 @@ function StatusPill({
 
 const httpBase = BACKEND_URL.startsWith("http") ? BACKEND_URL : BACKEND_URL.replace(/^ws/, "http");
 
-type MedEntry = { name: string; strength?: string };
+type MedEntry = { name: string; strength?: string; quantity?: number };
 type Schedule = {
   morning: MedEntry[];
   afternoon: MedEntry[];
@@ -88,7 +88,26 @@ type Schedule = {
 };
 
 const SLOTS = ["morning", "afternoon", "night"] as const;
-const SLOT_LABELS: Record<string, string> = { morning: "Morning (10–12)", afternoon: "Afternoon (2–4)", night: "Night (8–11)" };
+const DEFAULT_TIME_WINDOWS: Record<string, { start: string; end: string }> = {
+  morning: { start: "10:00", end: "12:00" },
+  afternoon: { start: "14:00", end: "16:00" },
+  night: { start: "20:00", end: "23:00" },
+};
+function time24To12(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = parseInt(hStr ?? "0", 10);
+  const m = mStr ?? "00";
+  if (h === 0) return `12:${m} AM`;
+  if (h === 12) return `12:${m} PM`;
+  if (h < 12) return `${h}:${m} AM`;
+  return `${h - 12}:${m} PM`;
+}
+function slotLabel(slot: string, timeWindows?: Record<string, { start: string; end: string }>): string {
+  const tw = timeWindows?.[slot] || DEFAULT_TIME_WINDOWS[slot];
+  const name = slot.charAt(0).toUpperCase() + slot.slice(1);
+  if (!tw) return name;
+  return `${name} (${time24To12(tw.start)} – ${time24To12(tw.end)})`;
+}
 
 export default function Home() {
   const [elderId, setElderId] = useState<string | null>(null);
@@ -110,6 +129,9 @@ export default function Home() {
   const [registerDisplayName, setRegisterDisplayName] = useState("");
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerLoading, setRegisterLoading] = useState(false);
+  const [registerTimeWindows, setRegisterTimeWindows] = useState<Record<string, { start: string; end: string }>>({
+    ...DEFAULT_TIME_WINDOWS,
+  });
 
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
@@ -141,7 +163,9 @@ export default function Home() {
           morning: data.morning ?? [],
           afternoon: data.afternoon ?? [],
           night: data.night ?? [],
-          timeWindows: data.timeWindows,
+          timeWindows: data.timeWindows
+            ? { ...DEFAULT_TIME_WINDOWS, ...data.timeWindows }
+            : DEFAULT_TIME_WINDOWS,
         });
       })
       .catch((err) => setScheduleError(err instanceof Error ? err.message : "Failed to load"))
@@ -189,6 +213,7 @@ export default function Home() {
           email: loginEmail.trim(),
           password: loginPassword,
           display_name: registerDisplayName.trim() || undefined,
+          time_windows: registerTimeWindows,
         }),
       });
       if (!res.ok) {
@@ -208,7 +233,7 @@ export default function Home() {
     } finally {
       setRegisterLoading(false);
     }
-  }, [loginEmail, loginPassword, registerDisplayName]);
+  }, [loginEmail, loginPassword, registerDisplayName, registerTimeWindows]);
 
   const handleLogout = useCallback(() => {
     session?.disconnect();
@@ -224,7 +249,7 @@ export default function Home() {
     if (slot === "timeWindows") return;
     setSchedule((s) => {
       if (!s) return s;
-      return { ...s, [slot]: [...s[slot], { name: "", strength: "" }] };
+      return { ...s, [slot]: [...s[slot], { name: "", strength: "", quantity: 1 }] };
     });
     setScheduleSaved(false);
   }, []);
@@ -241,14 +266,28 @@ export default function Home() {
   }, []);
 
   const updateMed = useCallback(
-    (slot: keyof Schedule, index: number, field: "name" | "strength", value: string) => {
+    (slot: keyof Schedule, index: number, field: "name" | "strength" | "quantity", value: string | number) => {
       if (slot === "timeWindows") return;
       setSchedule((s) => {
         if (!s) return s;
         const list = s[slot].map((m, i) =>
-          i === index ? { ...m, [field]: value } : m
+          i === index ? { ...m, [field]: field === "quantity" ? (typeof value === "number" ? value : Math.max(1, parseInt(String(value), 10) || 1)) : value } : m
         );
         return { ...s, [slot]: list };
+      });
+      setScheduleSaved(false);
+    },
+    []
+  );
+
+  const updateTimeWindow = useCallback(
+    (slot: string, field: "start" | "end", value: string) => {
+      if (slot === "timeWindows") return;
+      setSchedule((s) => {
+        if (!s) return s;
+        const tw = { ...(s.timeWindows || DEFAULT_TIME_WINDOWS) };
+        tw[slot] = { ...(tw[slot] || DEFAULT_TIME_WINDOWS[slot]), [field]: value };
+        return { ...s, timeWindows: tw };
       });
       setScheduleSaved(false);
     },
@@ -267,7 +306,7 @@ export default function Home() {
           morning: schedule.morning.filter((m) => m.name.trim()),
           afternoon: schedule.afternoon.filter((m) => m.name.trim()),
           night: schedule.night.filter((m) => m.name.trim()),
-          timeWindows: schedule.timeWindows,
+          timeWindows: schedule.timeWindows || DEFAULT_TIME_WINDOWS,
         }),
       });
       if (!res.ok) throw new Error("Could not save schedule");
@@ -397,6 +436,39 @@ export default function Home() {
                     className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
                     placeholder="••••••••"
                   />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    When do you take your meds? (optional)
+                  </p>
+                  {SLOTS.map((slot) => (
+                    <div key={slot} className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-400 w-20 capitalize">{slot}</span>
+                      <input
+                        type="time"
+                        value={registerTimeWindows[slot]?.start ?? "10:00"}
+                        onChange={(e) =>
+                          setRegisterTimeWindows((tw) => ({
+                            ...tw,
+                            [slot]: { ...tw[slot], start: e.target.value },
+                          }))
+                        }
+                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                      />
+                      <span className="text-zinc-500">to</span>
+                      <input
+                        type="time"
+                        value={registerTimeWindows[slot]?.end ?? "12:00"}
+                        onChange={(e) =>
+                          setRegisterTimeWindows((tw) => ({
+                            ...tw,
+                            [slot]: { ...tw[slot], end: e.target.value },
+                          }))
+                        }
+                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                      />
+                    </div>
+                  ))}
                 </div>
                 {(registerError || loginError) && (
                   <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
@@ -536,10 +608,33 @@ export default function Home() {
                 <p className="text-sm text-red-400">{scheduleError}</p>
               ) : schedule ? (
                 <>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                      Schedule times (when you take meds)
+                    </p>
+                    {SLOTS.map((slot) => (
+                      <div key={slot} className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-400 w-20 capitalize">{slot}</span>
+                        <input
+                          type="time"
+                          value={(schedule.timeWindows || DEFAULT_TIME_WINDOWS)[slot]?.start ?? "10:00"}
+                          onChange={(e) => updateTimeWindow(slot, "start", e.target.value)}
+                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                        />
+                        <span className="text-zinc-500">to</span>
+                        <input
+                          type="time"
+                          value={(schedule.timeWindows || DEFAULT_TIME_WINDOWS)[slot]?.end ?? "12:00"}
+                          onChange={(e) => updateTimeWindow(slot, "end", e.target.value)}
+                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                        />
+                      </div>
+                    ))}
+                  </div>
                   {SLOTS.map((slot) => (
                     <div key={slot} className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-zinc-400">{SLOT_LABELS[slot]}</span>
+                        <span className="text-xs font-medium text-zinc-400">{slotLabel(slot, schedule.timeWindows)}</span>
                         <button
                           type="button"
                           onClick={() => addMed(slot)}
@@ -550,13 +645,13 @@ export default function Home() {
                       </div>
                       <ul className="space-y-2">
                         {schedule[slot].map((med, i) => (
-                          <li key={i} className="flex gap-2 items-center">
+                          <li key={i} className="flex flex-wrap gap-2 items-center">
                             <input
                               type="text"
                               value={med.name}
                               onChange={(e) => updateMed(slot, i, "name", e.target.value)}
                               placeholder="Medication name"
-                              className="flex-1 h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                              className="flex-1 min-w-[100px] h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                             />
                             <input
                               type="text"
@@ -565,6 +660,16 @@ export default function Home() {
                               placeholder="e.g. 10 mg"
                               className="w-20 h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                             />
+                            <label className="flex items-center gap-1 text-xs text-zinc-400">
+                              Qty
+                              <input
+                                type="number"
+                                min={1}
+                                value={med.quantity ?? 1}
+                                onChange={(e) => updateMed(slot, i, "quantity", e.target.value)}
+                                className="w-12 h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                              />
+                            </label>
                             <button
                               type="button"
                               onClick={() => removeMed(slot, i)}

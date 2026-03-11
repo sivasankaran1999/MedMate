@@ -29,6 +29,20 @@ DEFAULT_TIME_WINDOWS = {
 }
 
 
+def _time_24_to_12(hhmm: str) -> str:
+    """Convert 'HH:MM' (24h) to 'h:MM AM/PM' (12h)."""
+    parts = (hhmm or "0:00").split(":")
+    h = int(parts[0]) if parts else 0
+    m = parts[1] if len(parts) > 1 else "00"
+    if h == 0:
+        return f"12:{m} AM"
+    if h == 12:
+        return f"12:{m} PM"
+    if h < 12:
+        return f"{h}:{m} AM"
+    return f"{h - 12}:{m} PM"
+
+
 def _format_schedule(schedule: dict[str, Any] | None) -> str:
     if not schedule:
         return "No medication schedule is set for this person."
@@ -38,7 +52,7 @@ def _format_schedule(schedule: dict[str, Any] | None) -> str:
         meds = schedule.get(slot) or []
         win = time_windows.get(slot) or DEFAULT_TIME_WINDOWS.get(slot) or {}
         start, end = win.get("start", "?"), win.get("end", "?")
-        window_str = f" ({start}–{end})" if start != "?" else ""
+        window_str = f" ({_time_24_to_12(start)} – {_time_24_to_12(end)})" if start != "?" else ""
         if not meds:
             lines.append(f"- {slot.capitalize()}{window_str}: none")
         else:
@@ -46,9 +60,13 @@ def _format_schedule(schedule: dict[str, Any] | None) -> str:
             for m in meds:
                 name = m.get("name", "?")
                 strength = m.get("strength")
-                parts.append(f"{name} {strength or ''}".strip())
+                qty = m.get("quantity")
+                if qty is not None and int(qty) > 1:
+                    parts.append(f"{name} {strength or ''}".strip() + f" (×{int(qty)})")
+                else:
+                    parts.append(f"{name} {strength or ''}".strip())
             count = len(meds)
-            lines.append(f"- {slot.capitalize()}{window_str}: {count} tablet(s) — " + "; ".join(parts))
+            lines.append(f"- {slot.capitalize()}{window_str}: {count} item(s) — " + "; ".join(parts))
     return "\n".join(lines)
 
 
@@ -68,14 +86,15 @@ def _format_time_windows_and_current_time(
     m = tw.get("morning") or DEFAULT_TIME_WINDOWS["morning"]
     a = tw.get("afternoon") or DEFAULT_TIME_WINDOWS["afternoon"]
     n = tw.get("night") or DEFAULT_TIME_WINDOWS["night"]
-    return f"""User's current local date and time ({tz_label}): {current_date} {current_time_24}. Use this time for all recommendations—do not ask the user what time it is.
+    now_12h = _time_24_to_12(current_time_24)
+    return f"""User's current local date and time ({tz_label}): {current_date}, {now_12h}. Use this time for all recommendations—do not ask the user what time it is.
 
-Medication time windows (24-hour, in user's local time):
-- Morning: {m.get('start', '10:00')}–{m.get('end', '12:00')}
-- Afternoon: {a.get('start', '14:00')}–{a.get('end', '16:00')}
-- Night: {n.get('start', '20:00')}–{n.get('end', '23:00')}
+Medication time windows (user's local time, standard 12-hour format):
+- Morning: {_time_24_to_12(m.get('start', '10:00'))} – {_time_24_to_12(m.get('end', '12:00'))}
+- Afternoon: {_time_24_to_12(a.get('start', '14:00'))} – {_time_24_to_12(a.get('end', '16:00'))}
+- Night: {_time_24_to_12(n.get('start', '20:00'))} – {_time_24_to_12(n.get('end', '23:00'))}
 
-Important: "Night" means only within the night window (e.g. 20:00–23:00). If it is 03:00 (3 AM) for the user, the night window has passed—do NOT say they can take the night pill "before bed" or now. Tell them that was for the previous evening and they should wait for the next morning window for morning meds."""
+Important: "Night" means only within the night window (e.g. 8 PM – 11 PM). If it is 3 AM for the user, the night window has passed—do NOT say they can take the night pill "before bed" or now. Tell them that was for the previous evening and they should wait for the next morning window for morning meds."""
 
 
 MEDMATE_PERSONA = """You are MedMate, a calm, clear, and patient voice assistant for an older adult. Use short, simple sentences. Speak slowly and clearly. Be warm and reassuring.
@@ -84,8 +103,9 @@ Language: Always reply in the same language the user speaks. If they ask in Tami
 
 Your role:
 - If the user asks what time it is or what the time is now, tell them their current local date and time from the context above (it is already provided for you).
-- Answer questions about this person's medication schedule (morning, afternoon, night) using the exact time windows given.
-- CRITICAL — Seeing pills or bottles: You can only see or identify a pill or bottle when the user has actually sent you an image (e.g. by turning on live video or showing it to the camera). If the user asks "can you see the aspirin I'm holding?" or "what pill is this?" or "do you see the tablet?" and you have NOT received an image in this conversation, do NOT say yes or identify anything. Say clearly that you cannot see it and ask them to turn on the live video (or show the pill/bottle to the camera) so you can look. Never guess or assume what they are holding based on voice alone.
+- "Which tablet should I take now?" / "What should I take now?" / "What do I take at this time?" — Answer from the schedule and current time only. Tell them which medications to take for the current slot (morning/afternoon/night). Do NOT ask them to show the camera for this. They need to know the right meds for right now; tell them from the schedule.
+- Answer other questions about this person's medication schedule (morning, afternoon, night) using the exact time windows given.
+- CRITICAL — Confirming or identifying what they are holding: You can only see or identify a pill/bottle when the user has actually sent you an image (turned on live video or shown it to the camera). If they ask "is this the right one?" or "can you confirm what I'm showing?" or "do you see the tablet I'm holding?" and you have NOT received an image, do NOT guess. Say clearly: "I can't see it yet—please turn on the live video and show me, then I can confirm." Never say yes or identify what they are holding based on voice alone.
 - When they have sent you an image of a pill or bottle, then identify it (for a pill: shape, color, and any letters or numbers on it; for a bottle: read the label). Match it to their schedule when possible.
 - If they send an image of something that is clearly NOT a pill, tablet, or medicine bottle (e.g. a phone, pen, food, random object), identify what you see in a friendly way, then say that you need to see their medication to help—e.g. "That looks like [object]. Please show me your tablet or medicine bottle so I can help you with your medications."
 - Use the current time and the time windows to say whether a pill is for "now" or for another time. If it is outside a slot's window (e.g. 3 AM and they ask about night pills), say that window has passed and what they should take in the next valid window.
@@ -106,7 +126,7 @@ def build_system_instruction(
 This person's medication schedule:
 {schedule_block}
 
-When answering "what do I take in the morning/afternoon/night?" use the schedule and time windows above. Only recommend taking a slot's meds if the current time is within that slot's window. When they show you a pill or bottle, compare it to this schedule and the current time."""
+When the user asks what to take now (by voice only), tell them from the schedule and current time—no camera needed. Only when they ask you to confirm or identify what they are holding must you have an image; then ask them to turn on the video and show you. When they show you a pill or bottle (after sending an image), compare it to this schedule and the current time."""
 
 
 def get_access_token() -> str:
