@@ -132,12 +132,31 @@ export default function Home() {
   const [registerTimeWindows, setRegisterTimeWindows] = useState<Record<string, { start: string; end: string }>>({
     ...DEFAULT_TIME_WINDOWS,
   });
+  const [registerEmergencyName, setRegisterEmergencyName] = useState("");
+  const [registerEmergencyEmail, setRegisterEmergencyEmail] = useState("");
+  const [registerPharmacistName, setRegisterPharmacistName] = useState("");
+  const [registerPharmacistEmail, setRegisterPharmacistEmail] = useState("");
+  const [registerPharmacistPhone, setRegisterPharmacistPhone] = useState("");
+
+  const [confirmDoseSlot, setConfirmDoseSlot] = useState<"morning" | "afternoon" | "night">("morning");
+  const [confirmDoseLoading, setConfirmDoseLoading] = useState(false);
+  const [confirmDoseMessage, setConfirmDoseMessage] = useState<string | null>(null);
 
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSaved, setScheduleSaved] = useState(false);
+
+  const [emergencyName, setEmergencyName] = useState("");
+  const [emergencyEmail, setEmergencyEmail] = useState("");
+  const [pharmacistName, setPharmacistName] = useState("");
+  const [pharmacistEmail, setPharmacistEmail] = useState("");
+  const [pharmacistPhone, setPharmacistPhone] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [contactsSaving, setContactsSaving] = useState(false);
+  const [contactsSaved, setContactsSaved] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -171,6 +190,58 @@ export default function Home() {
       .catch((err) => setScheduleError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setScheduleLoading(false));
   }, [elderId]);
+
+  useEffect(() => {
+    if (!elderId) return;
+    setProfileLoading(true);
+    fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/profile`)
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: { emergencyContact?: { name?: string; email?: string }; pharmacistContact?: { name?: string; email?: string; phone?: string } } | null) => {
+        if (data?.emergencyContact) {
+          setEmergencyName((data.emergencyContact as { name?: string }).name ?? "");
+          setEmergencyEmail((data.emergencyContact as { email?: string }).email ?? "");
+        }
+        if (data?.pharmacistContact) {
+          const pc = data.pharmacistContact as { name?: string; email?: string; phone?: string };
+          setPharmacistName(pc.name ?? "");
+          setPharmacistEmail(pc.email ?? "");
+          setPharmacistPhone(pc.phone ?? "");
+        }
+      })
+      .finally(() => setProfileLoading(false));
+  }, [elderId]);
+
+  const saveContacts = useCallback(async () => {
+    if (!elderId) return;
+    setContactsError(null);
+    setContactsSaving(true);
+    setContactsSaved(false);
+    try {
+      const res = await fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/contacts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emergency_contact_name: emergencyName.trim() || undefined,
+          emergency_contact_email: emergencyEmail.trim() || undefined,
+          pharmacist_name: pharmacistName.trim() || undefined,
+          pharmacist_email: pharmacistEmail.trim() || undefined,
+          pharmacist_phone: pharmacistPhone.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error((d as { detail?: string }).detail || "Failed to save");
+      }
+      setContactsSaved(true);
+    } catch (e) {
+      setContactsError(e instanceof Error ? e.message : "Failed to save contacts");
+    } finally {
+      setContactsSaving(false);
+    }
+  }, [elderId, emergencyName, emergencyEmail, pharmacistName, pharmacistEmail, pharmacistPhone]);
 
   const handleLogin = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,6 +285,11 @@ export default function Home() {
           password: loginPassword,
           display_name: registerDisplayName.trim() || undefined,
           time_windows: registerTimeWindows,
+          emergency_contact_name: registerEmergencyName.trim() || undefined,
+          emergency_contact_email: registerEmergencyEmail.trim() || undefined,
+          pharmacist_name: registerPharmacistName.trim() || undefined,
+          pharmacist_email: registerPharmacistEmail.trim() || undefined,
+          pharmacist_phone: registerPharmacistPhone.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -233,7 +309,17 @@ export default function Home() {
     } finally {
       setRegisterLoading(false);
     }
-  }, [loginEmail, loginPassword, registerDisplayName, registerTimeWindows]);
+  }, [
+    loginEmail,
+    loginPassword,
+    registerDisplayName,
+    registerTimeWindows,
+    registerEmergencyName,
+    registerEmergencyEmail,
+    registerPharmacistName,
+    registerPharmacistEmail,
+    registerPharmacistPhone,
+  ]);
 
   const handleLogout = useCallback(() => {
     session?.disconnect();
@@ -370,6 +456,28 @@ export default function Home() {
     session?.stopLiveVideoFeed();
   }, [session]);
 
+  const confirmDose = useCallback(
+    async (taken: boolean) => {
+      if (!elderId) return;
+      setConfirmDoseMessage(null);
+      setConfirmDoseLoading(true);
+      try {
+        const res = await fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/confirm-dose`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slot: confirmDoseSlot, taken }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to record");
+        setConfirmDoseMessage(taken ? "Recorded: you took it." : "Recorded: not taken. Emergency contact will be emailed if configured.");
+      } catch (e) {
+        setConfirmDoseMessage(e instanceof Error ? e.message : "Could not record.");
+      } finally {
+        setConfirmDoseLoading(false);
+      }
+    },
+    [elderId, confirmDoseSlot]
+  );
+
   const isConnected = status === "connected";
 
   if (elderId === null) {
@@ -435,6 +543,51 @@ export default function Home() {
                     autoComplete="new-password"
                     className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
                     placeholder="••••••••"
+                  />
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Emergency contact (we’ll email them if a dose isn’t taken)
+                  </p>
+                  <input
+                    type="text"
+                    value={registerEmergencyName}
+                    onChange={(e) => setRegisterEmergencyName(e.target.value)}
+                    placeholder="Name (e.g. son/daughter)"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                  <input
+                    type="email"
+                    value={registerEmergencyEmail}
+                    onChange={(e) => setRegisterEmergencyEmail(e.target.value)}
+                    placeholder="Their email"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Pharmacist contact (optional)
+                  </p>
+                  <input
+                    type="text"
+                    value={registerPharmacistName}
+                    onChange={(e) => setRegisterPharmacistName(e.target.value)}
+                    placeholder="Name or pharmacy"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                  <input
+                    type="email"
+                    value={registerPharmacistEmail}
+                    onChange={(e) => setRegisterPharmacistEmail(e.target.value)}
+                    placeholder="Email"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                  <input
+                    type="tel"
+                    value={registerPharmacistPhone}
+                    onChange={(e) => setRegisterPharmacistPhone(e.target.value)}
+                    placeholder="Phone"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
                   />
                 </div>
                 <div className="space-y-2">
@@ -696,6 +849,119 @@ export default function Home() {
                   </div>
                 </>
               ) : null}
+            </div>
+
+            {/* Emergency & pharmacist contacts — editable after signup */}
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+                Emergency & pharmacist contacts
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Who to notify if you don’t take a dose. You can update these anytime.
+              </p>
+              {profileLoading ? (
+                <p className="text-sm text-zinc-500">Loading…</p>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-zinc-500">Emergency contact (e.g. family)</p>
+                    <input
+                      type="text"
+                      value={emergencyName}
+                      onChange={(e) => setEmergencyName(e.target.value)}
+                      placeholder="Name"
+                      className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    />
+                    <input
+                      type="email"
+                      value={emergencyEmail}
+                      onChange={(e) => setEmergencyEmail(e.target.value)}
+                      placeholder="Email (we’ll email them if a dose isn’t taken)"
+                      className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-zinc-500">Pharmacist (optional)</p>
+                    <input
+                      type="text"
+                      value={pharmacistName}
+                      onChange={(e) => setPharmacistName(e.target.value)}
+                      placeholder="Name or pharmacy"
+                      className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    />
+                    <input
+                      type="email"
+                      value={pharmacistEmail}
+                      onChange={(e) => setPharmacistEmail(e.target.value)}
+                      placeholder="Email"
+                      className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    />
+                    <input
+                      type="tel"
+                      value={pharmacistPhone}
+                      onChange={(e) => setPharmacistPhone(e.target.value)}
+                      placeholder="Phone"
+                      className="w-full h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={saveContacts}
+                      disabled={contactsSaving}
+                      className="h-9 px-4 rounded-lg bg-cyan-500/20 text-cyan-400 font-medium text-sm hover:bg-cyan-500/30 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:opacity-70"
+                    >
+                      {contactsSaving ? "Saving…" : contactsSaved ? "Saved" : "Save contacts"}
+                    </button>
+                    {contactsError && <span className="text-xs text-red-400">{contactsError}</span>}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Tablet taken? — record dose and optionally notify emergency contact */}
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+                Tablet taken?
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Say which dose (morning / afternoon / night), then record whether you took it. If you didn’t, we’ll email your emergency contact when configured.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={confirmDoseSlot}
+                  onChange={(e) => {
+                    setConfirmDoseSlot(e.target.value as "morning" | "afternoon" | "night");
+                    setConfirmDoseMessage(null);
+                  }}
+                  className="h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                >
+                  {SLOTS.map((s) => (
+                    <option key={s} value={s} className="bg-[#0a0a0f] text-white">
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => confirmDose(true)}
+                  disabled={confirmDoseLoading}
+                  className="h-10 px-4 rounded-lg bg-emerald-500/20 text-emerald-400 font-medium text-sm hover:bg-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-70"
+                >
+                  I took it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmDose(false)}
+                  disabled={confirmDoseLoading}
+                  className="h-10 px-4 rounded-lg bg-amber-500/20 text-amber-400 font-medium text-sm hover:bg-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-70"
+                >
+                  I didn’t take it
+                </button>
+              </div>
+              {confirmDoseMessage && (
+                <p className="text-xs text-zinc-400">{confirmDoseMessage}</p>
+              )}
             </div>
 
             {/* Status */}

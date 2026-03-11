@@ -21,7 +21,14 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from firestore_client import create_user, get_elder_schedule, get_user_by_email, set_elder_schedule
+from firestore_client import (
+    create_user,
+    get_elder,
+    get_elder_schedule,
+    get_user_by_email,
+    record_dose_confirmation,
+    set_elder_schedule,
+)
 
 app = FastAPI(title="MedMate Backend", version="0.1.0")
 app.add_middleware(
@@ -106,6 +113,11 @@ class RegisterPayload(BaseModel):
     password: str
     display_name: str | None = None
     time_windows: dict[str, Any] | None = None  # e.g. {"morning": {"start": "10:00", "end": "12:00"}, ...}
+    emergency_contact_name: str | None = None
+    emergency_contact_email: str | None = None  # family/contact notified via email if dose not taken
+    pharmacist_name: str | None = None
+    pharmacist_email: str | None = None
+    pharmacist_phone: str | None = None
 
 
 @app.post("/auth/register")
@@ -123,11 +135,27 @@ def register(body: RegisterPayload):
             if isinstance(v, dict) and v.get("start") and v.get("end"):
                 tw[slot] = {"start": str(v["start"]), "end": str(v["end"])}
         schedule["timeWindows"] = tw
+    emergency_contact = None
+    if (body.emergency_contact_email or "").strip():
+        emergency_contact = {
+            "name": (body.emergency_contact_name or "").strip() or "Emergency contact",
+            "email": (body.emergency_contact_email or "").strip().lower(),
+        }
+    pharmacist_contact = None
+    if (body.pharmacist_email or body.pharmacist_phone or body.pharmacist_name):
+        pharmacist_contact = {
+            "name": (body.pharmacist_name or "").strip() or None,
+            "email": (body.pharmacist_email or "").strip().lower() or None,
+            "phone": (body.pharmacist_phone or "").strip() or None,
+        }
+        pharmacist_contact = {k: v for k, v in pharmacist_contact.items() if v}
     set_elder_schedule(
         elder_id,
         schedule,
         display_name=body.display_name or body.email.split("@")[0],
         language="en",
+        emergency_contact=emergency_contact,
+        pharmacist_contact=pharmacist_contact if pharmacist_contact else None,
     )
     create_user(
         body.email,
@@ -178,6 +206,126 @@ def update_schedule(elder_id: str, body: SchedulePayload):
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     return {"ok": True}
+
+
+@app.get("/elders/{elder_id}/profile")
+def get_profile(elder_id: str):
+    """Return elder profile: displayName, emergencyContact, pharmacistContact (for editing contacts)."""
+    try:
+        elder = get_elder(elder_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if elder is None:
+        raise HTTPException(status_code=404, detail="Elder not found")
+    return {
+        "displayName": elder.get("displayName") or elder.get("display_name"),
+        "emergencyContact": elder.get("emergencyContact") or elder.get("emergency_contact"),
+        "pharmacistContact": elder.get("pharmacistContact") or elder.get("pharmacist_contact"),
+    }
+
+
+class UpdateContactsPayload(BaseModel):
+    emergency_contact_name: str | None = None
+    emergency_contact_email: str | None = None
+    pharmacist_name: str | None = None
+    pharmacist_email: str | None = None
+    pharmacist_phone: str | None = None
+
+
+@app.put("/elders/{elder_id}/contacts")
+def update_contacts(elder_id: str, body: UpdateContactsPayload):
+    """Update emergency and/or pharmacist contact. Keeps existing schedule."""
+    try:
+        schedule = get_elder_schedule(elder_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if schedule is None:
+        raise HTTPException(status_code=404, detail="Elder not found")
+    emergency_contact = None
+    if (body.emergency_contact_email or "").strip():
+        emergency_contact = {
+            "name": (body.emergency_contact_name or "").strip() or "Emergency contact",
+            "email": (body.emergency_contact_email or "").strip().lower(),
+        }
+    pharmacist_contact = None
+    if (body.pharmacist_email or body.pharmacist_phone or (body.pharmacist_name or "").strip()):
+        pharmacist_contact = {
+            "name": (body.pharmacist_name or "").strip() or None,
+            "email": (body.pharmacist_email or "").strip().lower() or None,
+            "phone": (body.pharmacist_phone or "").strip() or None,
+        }
+        pharmacist_contact = {k: v for k, v in pharmacist_contact.items() if v}
+    try:
+        set_elder_schedule(
+            elder_id,
+            schedule,
+            emergency_contact=emergency_contact,
+            pharmacist_contact=pharmacist_contact,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {"ok": True}
+
+
+class ConfirmDosePayload(BaseModel):
+    slot: str  # "morning" | "afternoon" | "night"
+    taken: bool
+
+
+def _send_dose_notification_email(
+    to_email: str, to_name: str, elder_display_name: str, slot: str, taken: bool
+) -> None:
+    """Send email via SMTP notifying emergency contact: either that the dose was taken or not taken. No-op if SMTP not configured."""
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        import logging
+        logging.getLogger("uvicorn.error").info("SMTP not configured; skipping dose notification email")
+        return
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASSWORD", "")
+    from_addr = os.environ.get("FROM_EMAIL", user or "medmate@localhost").strip()
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    msg = MIMEMultipart("alternative")
+    if taken:
+        msg["Subject"] = f"MedMate: {elder_display_name} took {slot} medication"
+        body_text = f"Hello {to_name},\n\n{elder_display_name} has confirmed they took their {slot} medication.\n\n— MedMate"
+    else:
+        msg["Subject"] = f"MedMate: {elder_display_name} did not take {slot} medication"
+        body_text = f"Hello {to_name},\n\n{elder_display_name} has indicated they did not take their {slot} medication. You may want to follow up.\n\n— MedMate"
+    msg["From"] = from_addr
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_text, "plain"))
+    try:
+        with smtplib.SMTP(host, port) as s:
+            if port == 587:
+                s.starttls()
+            if user and password:
+                s.login(user, password)
+            s.sendmail(from_addr, [to_email], msg.as_string())
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").warning("Failed to send dose notification email: %s", e)
+
+
+@app.post("/elders/{elder_id}/confirm-dose")
+def confirm_dose(elder_id: str, body: ConfirmDosePayload):
+    """Record whether the user took their dose for the given slot. Notify emergency contact by email for both taken and not taken."""
+    if body.slot not in ("morning", "afternoon", "night"):
+        raise HTTPException(status_code=400, detail="slot must be morning, afternoon, or night")
+    try:
+        contact = record_dose_confirmation(elder_id, body.slot, body.taken)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    elder = get_elder(elder_id) if contact else None
+    display_name = (elder or {}).get("displayName") or (elder or {}).get("display_name") or "Your family member"
+    if contact and contact.get("email"):
+        _send_dose_notification_email(
+            contact["email"], contact.get("name", "Family"), display_name, body.slot, body.taken
+        )
+    return {"ok": True, "recorded": body.taken}
 
 
 def _get_query_param(scope: dict, name: str) -> str | None:

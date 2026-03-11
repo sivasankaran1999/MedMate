@@ -4,6 +4,8 @@ Firestore access for MedMate elder schedules and users (auth).
 Elders: collection "elders", document ID = elder ID.
   - schedule: { morning, afternoon, night, timeWindows?: { morning: {start,end}, ... } }
   - displayName?: str, language?: str
+  - emergencyContact?: { name: str, email: str }  # family/contact to notify via email
+  - pharmacistContact?: { name?: str, email?: str, phone?: str }
 
 Users (sign-in): collection "users", document ID = normalized email (lowercase).
   - email: str, elder_id: str, display_name?: str, password: str (demo only; use hash in prod)
@@ -54,8 +56,10 @@ def set_elder_schedule(
     schedule: dict[str, Any],
     display_name: str | None = None,
     language: str | None = None,
+    emergency_contact: dict[str, str] | None = None,
+    pharmacist_contact: dict[str, str] | None = None,
 ) -> None:
-    """Create or update an elder document with the given schedule."""
+    """Create or update an elder document with the given schedule and optional contacts."""
     db = _get_db()
     ref = db.collection("elders").document(elder_id)
     data: dict[str, Any] = {"schedule": schedule}
@@ -63,6 +67,15 @@ def set_elder_schedule(
         data["displayName"] = display_name
     if language is not None:
         data["language"] = language
+    if emergency_contact is not None and isinstance(emergency_contact, dict):
+        data["emergencyContact"] = {
+            "name": str(emergency_contact.get("name", "")).strip(),
+            "email": str(emergency_contact.get("email", "")).strip().lower(),
+        }
+    if pharmacist_contact is not None and isinstance(pharmacist_contact, dict):
+        data["pharmacistContact"] = {
+            k: str(v).strip() for k, v in pharmacist_contact.items() if v
+        }
     ref.set(data, merge=True)
 
 
@@ -76,6 +89,27 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
     if not doc.exists:
         return None
     return doc.to_dict()
+
+
+def record_dose_confirmation(elder_id: str, slot: str, taken: bool) -> dict[str, Any] | None:
+    """Record that the user confirmed (or did not take) a dose for the given slot. Returns emergency contact dict if they have an email (so we can notify for both taken and not taken)."""
+    if slot not in ("morning", "afternoon", "night"):
+        return None
+    db = _get_db()
+    ref = db.collection("elders").document(elder_id)
+    doc = ref.get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    from datetime import datetime, timezone
+    confirmations = dict(data.get("doseConfirmations") or {})
+    confirmations[slot] = {"at": datetime.now(timezone.utc).isoformat(), "taken": taken}
+    ref.set({"doseConfirmations": confirmations}, merge=True)
+    ec = data.get("emergencyContact") or data.get("emergency_contact")
+    email = (ec.get("email") or "").strip() if isinstance(ec, dict) else ""
+    if isinstance(ec, dict) and email:
+        return {"name": (ec.get("name") or "Emergency contact").strip(), "email": email}
+    return None
 
 
 def create_user(email: str, password: str, elder_id: str, display_name: str | None = None) -> None:

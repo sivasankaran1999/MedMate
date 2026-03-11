@@ -19,6 +19,9 @@ Stores each person’s medication schedule. Document ID = elder ID (e.g. `elder-
 | `schedule.timeWindows` | map | Optional. 24h windows: `morning` / `afternoon` / `night` → `{ "start": "HH:MM", "end": "HH:MM" }`. Defaults: morning 10:00–12:00, afternoon 14:00–16:00, night 20:00–23:00. |
 | `displayName` | string | Optional. Display name. |
 | `language` | string | Optional. e.g. `"en"`. |
+| `emergencyContact` | map | Optional. `{ "name": string, "email": string }` — family/contact to notify by email when a dose is not taken. |
+| `pharmacistContact` | map | Optional. `{ "name"?, "email"?, "phone"?: string }` — pharmacist or pharmacy contact. |
+| `doseConfirmations` | map | Optional. Per-slot confirmation: `morning` / `afternoon` / `night` → `{ "at": ISO8601, "taken": bool }`. |
 | `lastKnownLocation` | map | Optional. `{ "lat", "lng", "updatedAt" }` for future use. |
 
 **Example**
@@ -42,7 +45,13 @@ Stores each person’s medication schedule. Document ID = elder ID (e.g. `elder-
     ]
   },
   "displayName": "Jane",
-  "language": "en"
+  "language": "en",
+  "emergencyContact": { "name": "John (son)", "email": "john@example.com" },
+  "pharmacistContact": { "name": "Main St Pharmacy", "phone": "+1234567890" },
+  "doseConfirmations": {
+    "morning": { "at": "2025-03-10T14:30:00Z", "taken": true },
+    "night": { "at": "2025-03-10T03:05:00Z", "taken": false }
+  }
 }
 ```
 
