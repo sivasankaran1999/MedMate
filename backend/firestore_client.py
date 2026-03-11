@@ -1,11 +1,12 @@
 """
-Firestore access for MedMate elder schedules.
+Firestore access for MedMate elder schedules and users (auth).
 
-Schema: collection "elders", document ID = elder ID.
-Document fields:
-  - schedule: { morning: [{ name: str, strength?: str }], afternoon: [...], night: [...] }
-  - displayName?: str
-  - language?: str
+Elders: collection "elders", document ID = elder ID.
+  - schedule: { morning, afternoon, night, timeWindows?: { morning: {start,end}, ... } }
+  - displayName?: str, language?: str
+
+Users (sign-in): collection "users", document ID = normalized email (lowercase).
+  - email: str, elder_id: str, display_name?: str, password: str (demo only; use hash in prod)
 """
 
 from __future__ import annotations
@@ -63,3 +64,29 @@ def set_elder_schedule(
     if language is not None:
         data["language"] = language
     ref.set(data, merge=True)
+
+
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    """Load user by email (document ID = normalized email). Returns None if not found."""
+    if not email or not email.strip():
+        return None
+    key = email.strip().lower()
+    db = _get_db()
+    doc = db.collection("users").document(key).get()
+    if not doc.exists:
+        return None
+    return doc.to_dict()
+
+
+def create_user(email: str, password: str, elder_id: str, display_name: str | None = None) -> None:
+    """Create a user for sign-in. Demo: password stored as-is; in prod use a hash."""
+    key = email.strip().lower()
+    db = _get_db()
+    data: dict[str, Any] = {
+        "email": key,
+        "password": password,
+        "elder_id": elder_id,
+    }
+    if display_name is not None:
+        data["display_name"] = display_name
+    db.collection("users").document(key).set(data, merge=True)

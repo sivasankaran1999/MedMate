@@ -10,7 +10,8 @@ import {
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
-const DEFAULT_ELDER_ID = "elder-demo";
+const AUTH_KEY = "medmate_elder_id";
+const AUTH_DISPLAY_NAME_KEY = "medmate_display_name";
 
 function statusLabel(s: SessionStatus): string {
   switch (s) {
@@ -76,8 +77,22 @@ function StatusPill({
   );
 }
 
+const httpBase = BACKEND_URL.startsWith("http") ? BACKEND_URL : BACKEND_URL.replace(/^ws/, "http");
+
+type MedEntry = { name: string; strength?: string };
+type Schedule = {
+  morning: MedEntry[];
+  afternoon: MedEntry[];
+  night: MedEntry[];
+  timeWindows?: Record<string, { start: string; end: string }>;
+};
+
+const SLOTS = ["morning", "afternoon", "night"] as const;
+const SLOT_LABELS: Record<string, string> = { morning: "Morning (10–12)", afternoon: "Afternoon (2–4)", night: "Night (8–11)" };
+
 export default function Home() {
-  const [elderId, setElderId] = useState(DEFAULT_ELDER_ID);
+  const [elderId, setElderId] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [status, setStatus] = useState<SessionStatus>("disconnected");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +101,184 @@ export default function Home() {
   const [liveVideoActive, setLiveVideoActive] = useState(false);
   const [session, setSession] = useState<LiveSession | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
+
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [showSignUp, setShowSignUp] = useState(false);
+  const [registerDisplayName, setRegisterDisplayName] = useState("");
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerLoading, setRegisterLoading] = useState(false);
+
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleSaved, setScheduleSaved] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = sessionStorage.getItem(AUTH_KEY);
+    const name = sessionStorage.getItem(AUTH_DISPLAY_NAME_KEY);
+    if (id) {
+      setElderId(id);
+      setDisplayName(name || "User");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!elderId) return;
+    setScheduleLoading(true);
+    setScheduleError(null);
+    fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/schedule`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Could not load schedule");
+        return res.json();
+      })
+      .then((data: Schedule) => {
+        setSchedule({
+          morning: data.morning ?? [],
+          afternoon: data.afternoon ?? [],
+          night: data.night ?? [],
+          timeWindows: data.timeWindows,
+        });
+      })
+      .catch((err) => setScheduleError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setScheduleLoading(false));
+  }, [elderId]);
+
+  const handleLogin = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    setLoginLoading(true);
+    try {
+      const res = await fetch(`${httpBase}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || res.statusText || "Login failed");
+      }
+      const data = await res.json();
+      const id = data.elder_id;
+      const name = data.display_name || loginEmail.split("@")[0];
+      if (!id) throw new Error("No elder_id returned");
+      sessionStorage.setItem(AUTH_KEY, id);
+      sessionStorage.setItem(AUTH_DISPLAY_NAME_KEY, name);
+      setElderId(id);
+      setDisplayName(name);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [loginEmail, loginPassword]);
+
+  const handleRegister = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterError(null);
+    setRegisterLoading(true);
+    try {
+      const res = await fetch(`${httpBase}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: loginEmail.trim(),
+          password: loginPassword,
+          display_name: registerDisplayName.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || res.statusText || "Registration failed");
+      }
+      const data = await res.json();
+      const id = data.elder_id;
+      const name = data.display_name || loginEmail.split("@")[0];
+      if (!id) throw new Error("No elder_id returned");
+      sessionStorage.setItem(AUTH_KEY, id);
+      sessionStorage.setItem(AUTH_DISPLAY_NAME_KEY, name);
+      setElderId(id);
+      setDisplayName(name);
+    } catch (err) {
+      setRegisterError(err instanceof Error ? err.message : "Registration failed");
+    } finally {
+      setRegisterLoading(false);
+    }
+  }, [loginEmail, loginPassword, registerDisplayName]);
+
+  const handleLogout = useCallback(() => {
+    session?.disconnect();
+    setSession(null);
+    sessionStorage.removeItem(AUTH_KEY);
+    sessionStorage.removeItem(AUTH_DISPLAY_NAME_KEY);
+    setElderId(null);
+    setDisplayName(null);
+    setError(null);
+  }, [session]);
+
+  const addMed = useCallback((slot: keyof Schedule) => {
+    if (slot === "timeWindows") return;
+    setSchedule((s) => {
+      if (!s) return s;
+      return { ...s, [slot]: [...s[slot], { name: "", strength: "" }] };
+    });
+    setScheduleSaved(false);
+  }, []);
+
+  const removeMed = useCallback((slot: keyof Schedule, index: number) => {
+    if (slot === "timeWindows") return;
+    setSchedule((s) => {
+      if (!s) return s;
+      const list = [...s[slot]];
+      list.splice(index, 1);
+      return { ...s, [slot]: list };
+    });
+    setScheduleSaved(false);
+  }, []);
+
+  const updateMed = useCallback(
+    (slot: keyof Schedule, index: number, field: "name" | "strength", value: string) => {
+      if (slot === "timeWindows") return;
+      setSchedule((s) => {
+        if (!s) return s;
+        const list = s[slot].map((m, i) =>
+          i === index ? { ...m, [field]: value } : m
+        );
+        return { ...s, [slot]: list };
+      });
+      setScheduleSaved(false);
+    },
+    []
+  );
+
+  const saveSchedule = useCallback(async () => {
+    if (!elderId || !schedule) return;
+    setScheduleSaving(true);
+    setScheduleError(null);
+    try {
+      const res = await fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/schedule`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          morning: schedule.morning.filter((m) => m.name.trim()),
+          afternoon: schedule.afternoon.filter((m) => m.name.trim()),
+          night: schedule.night.filter((m) => m.name.trim()),
+          timeWindows: schedule.timeWindows,
+        }),
+      });
+      if (!res.ok) throw new Error("Could not save schedule");
+      setScheduleSaved(true);
+      setTimeout(() => setScheduleSaved(false), 3000);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setScheduleSaving(false);
+    }
+  }, [elderId, schedule]);
 
   useEffect(() => {
     const video = cameraVideoRef.current;
@@ -109,6 +302,7 @@ export default function Home() {
   };
 
   const connect = useCallback(() => {
+    if (!elderId) return;
     setError(null);
     const s = new LiveSession(BACKEND_URL, elderId, callbacks);
     setSession(s);
@@ -139,6 +333,159 @@ export default function Home() {
 
   const isConnected = status === "connected";
 
+  if (elderId === null) {
+    return (
+      <main className="min-h-screen relative overflow-hidden">
+        <div className="absolute inset-0 bg-[#0a0a0f]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(34,211,238,0.15),transparent)]" />
+        <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 sm:p-8">
+          <div className="w-full max-w-md flex flex-col gap-8">
+            <header className="text-center space-y-2">
+              <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-white to-zinc-300 bg-clip-text text-transparent">
+                MedMate
+              </h1>
+              <p className="text-zinc-500 text-sm">
+                {showSignUp ? "Create an account to get started." : "Sign in to access your medication schedule."}
+              </p>
+            </header>
+            {showSignUp ? (
+              <form
+                onSubmit={handleRegister}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-5"
+              >
+                <div>
+                  <label htmlFor="reg-email" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                    Email
+                  </label>
+                  <input
+                    id="reg-email"
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="reg-name" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                    Name (optional)
+                  </label>
+                  <input
+                    id="reg-name"
+                    type="text"
+                    value={registerDisplayName}
+                    onChange={(e) => setRegisterDisplayName(e.target.value)}
+                    autoComplete="name"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    placeholder="Your name"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="reg-password" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="reg-password"
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    placeholder="••••••••"
+                  />
+                </div>
+                {(registerError || loginError) && (
+                  <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
+                    {registerError || loginError}
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  disabled={registerLoading}
+                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] disabled:opacity-70 disabled:cursor-wait transition-all"
+                >
+                  {registerLoading ? "Creating account…" : "Create account"}
+                </button>
+                <p className="text-center text-sm text-zinc-400">
+                  Already have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => { setShowSignUp(false); setRegisterError(null); setLoginError(null); }}
+                    className="text-cyan-400 hover:text-cyan-300 underline focus:outline-none"
+                  >
+                    Sign in
+                  </button>
+                </p>
+              </form>
+            ) : (
+              <form
+                onSubmit={handleLogin}
+                className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-5"
+              >
+                <div>
+                  <label htmlFor="login-email" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                    Email
+                  </label>
+                  <input
+                    id="login-email"
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="login-password" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="login-password"
+                    type="password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    placeholder="••••••••"
+                  />
+                </div>
+                {loginError && (
+                  <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
+                    {loginError}
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] disabled:opacity-70 disabled:cursor-wait transition-all"
+                >
+                  {loginLoading ? "Signing in…" : "Sign in"}
+                </button>
+                <p className="text-center text-sm text-zinc-400">
+                  New user?{" "}
+                  <button
+                    type="button"
+                    onClick={() => { setShowSignUp(true); setLoginError(null); setRegisterError(null); }}
+                    className="text-cyan-400 hover:text-cyan-300 underline focus:outline-none"
+                  >
+                    Create account
+                  </button>
+                </p>
+              </form>
+            )}
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen relative overflow-hidden">
       {/* Background */}
@@ -161,26 +508,89 @@ export default function Home() {
 
           {/* Main card */}
           <section className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 shadow-2xl shadow-black/20 space-y-6">
-            {/* Profile */}
-            <div>
-              <label
-                htmlFor="elder-id"
-                className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2"
+            {/* Signed-in user */}
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-zinc-400">
+                Signed in as <span className="text-zinc-200 font-medium">{displayName ?? "User"}</span>
+              </p>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="text-sm text-zinc-500 hover:text-zinc-300 underline focus:outline-none focus:ring-2 focus:ring-cyan-500/50 rounded px-2 py-1"
               >
-                Profile
-              </label>
-              <select
-                id="elder-id"
-                value={elderId}
-                onChange={(e) => setElderId(e.target.value)}
-                disabled={isConnected}
-                className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 disabled:opacity-50 transition-all cursor-pointer"
-                aria-label="Select profile"
-              >
-                <option value="elder-demo" className="bg-zinc-900 text-white">
-                  Demo Elder
-                </option>
-              </select>
+                Sign out
+              </button>
+            </div>
+
+            {/* My medications — so the agent knows what you take and when */}
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-4">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+                My medications
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Add your meds below. MedMate uses this when you ask &quot;What do I take in the morning?&quot; or show a pill.
+              </p>
+              {scheduleLoading ? (
+                <p className="text-sm text-zinc-500">Loading…</p>
+              ) : scheduleError ? (
+                <p className="text-sm text-red-400">{scheduleError}</p>
+              ) : schedule ? (
+                <>
+                  {SLOTS.map((slot) => (
+                    <div key={slot} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-zinc-400">{SLOT_LABELS[slot]}</span>
+                        <button
+                          type="button"
+                          onClick={() => addMed(slot)}
+                          className="text-xs text-cyan-400 hover:text-cyan-300"
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      <ul className="space-y-2">
+                        {schedule[slot].map((med, i) => (
+                          <li key={i} className="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              value={med.name}
+                              onChange={(e) => updateMed(slot, i, "name", e.target.value)}
+                              placeholder="Medication name"
+                              className="flex-1 h-9 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                            <input
+                              type="text"
+                              value={med.strength ?? ""}
+                              onChange={(e) => updateMed(slot, i, "strength", e.target.value)}
+                              placeholder="e.g. 10 mg"
+                              className="w-20 h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeMed(slot, i)}
+                              className="text-zinc-500 hover:text-red-400 text-sm"
+                              aria-label="Remove"
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={saveSchedule}
+                      disabled={scheduleSaving}
+                      className="h-10 px-4 rounded-xl bg-cyan-500/20 text-cyan-400 font-medium text-sm hover:bg-cyan-500/30 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:opacity-70"
+                    >
+                      {scheduleSaving ? "Saving…" : scheduleSaved ? "Saved" : "Save schedule"}
+                    </button>
+                    {scheduleError && <span className="text-xs text-red-400">{scheduleError}</span>}
+                  </div>
+                </>
+              ) : null}
             </div>
 
             {/* Status */}

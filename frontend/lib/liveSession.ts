@@ -108,7 +108,10 @@ export class LiveSession {
       return Promise.reject(new Error("Backend not reachable"));
     }
 
-    const url = `${this.backendUrl}/ws?elder_id=${encodeURIComponent(this.elderId)}`;
+    const timezone = typeof Intl !== "undefined" && Intl.DateTimeFormat
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone
+      : "";
+    const url = `${this.backendUrl}/ws?elder_id=${encodeURIComponent(this.elderId)}${timezone ? `&timezone=${encodeURIComponent(timezone)}` : ""}`;
     const CONNECT_TIMEOUT_MS = 15000;
 
     return new Promise((resolve, reject) => {

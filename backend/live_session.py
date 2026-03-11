@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import google.auth
 
@@ -19,42 +21,92 @@ LIVE_API_HOST = "us-central1-aiplatform.googleapis.com"
 LIVE_API_PATH = "/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent"
 LIVE_MODEL = "gemini-2.0-flash-live-preview-04-09"
 
+# Default time windows (24h): morning 10–12, afternoon 2–4, night 8–11 (so 3 AM is NOT "night")
+DEFAULT_TIME_WINDOWS = {
+    "morning": {"start": "10:00", "end": "12:00"},
+    "afternoon": {"start": "14:00", "end": "16:00"},
+    "night": {"start": "20:00", "end": "23:00"},
+}
+
 
 def _format_schedule(schedule: dict[str, Any] | None) -> str:
     if not schedule:
         return "No medication schedule is set for this person."
     lines = []
+    time_windows = schedule.get("timeWindows") or DEFAULT_TIME_WINDOWS
     for slot in ("morning", "afternoon", "night"):
         meds = schedule.get(slot) or []
+        win = time_windows.get(slot) or DEFAULT_TIME_WINDOWS.get(slot) or {}
+        start, end = win.get("start", "?"), win.get("end", "?")
+        window_str = f" ({start}–{end})" if start != "?" else ""
         if not meds:
-            lines.append(f"- {slot.capitalize()}: none")
+            lines.append(f"- {slot.capitalize()}{window_str}: none")
         else:
             parts = []
             for m in meds:
                 name = m.get("name", "?")
                 strength = m.get("strength")
                 parts.append(f"{name} {strength or ''}".strip())
-            lines.append(f"- {slot.capitalize()}: " + "; ".join(parts))
+            count = len(meds)
+            lines.append(f"- {slot.capitalize()}{window_str}: {count} tablet(s) — " + "; ".join(parts))
     return "\n".join(lines)
+
+
+def _format_time_windows_and_current_time(
+    schedule: dict[str, Any] | None,
+    user_timezone: str | None = None,
+) -> str:
+    try:
+        tz = ZoneInfo(user_timezone) if user_timezone else timezone.utc
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
+    current_time_24 = now.strftime("%H:%M")
+    current_date = now.strftime("%Y-%m-%d")
+    tz_label = user_timezone if user_timezone else "UTC"
+    tw = (schedule or {}).get("timeWindows") or DEFAULT_TIME_WINDOWS
+    m = tw.get("morning") or DEFAULT_TIME_WINDOWS["morning"]
+    a = tw.get("afternoon") or DEFAULT_TIME_WINDOWS["afternoon"]
+    n = tw.get("night") or DEFAULT_TIME_WINDOWS["night"]
+    return f"""User's current local date and time ({tz_label}): {current_date} {current_time_24}. Use this time for all recommendations—do not ask the user what time it is.
+
+Medication time windows (24-hour, in user's local time):
+- Morning: {m.get('start', '10:00')}–{m.get('end', '12:00')}
+- Afternoon: {a.get('start', '14:00')}–{a.get('end', '16:00')}
+- Night: {n.get('start', '20:00')}–{n.get('end', '23:00')}
+
+Important: "Night" means only within the night window (e.g. 20:00–23:00). If it is 03:00 (3 AM) for the user, the night window has passed—do NOT say they can take the night pill "before bed" or now. Tell them that was for the previous evening and they should wait for the next morning window for morning meds."""
 
 
 MEDMATE_PERSONA = """You are MedMate, a calm, clear, and patient voice assistant for an older adult. Use short, simple sentences. Speak slowly and clearly. Be warm and reassuring.
 
+Language: Always reply in the same language the user speaks. If they ask in Tamil, reply in Tamil. If they ask in Spanish, reply in Spanish. If they switch language mid-conversation, reply in whatever language they used in their most recent message. Match their language in every response.
+
 Your role:
-- Answer questions about this person's medication schedule (morning, afternoon, night).
-- When they show you a pill or a bottle (by sending an image), identify it (for a pill: shape, color, and any letters or numbers on it; for a bottle: read the label). Match it to their schedule when possible.
-- Use the current time of day to say whether a pill is for "now" or for another time. If they show a pill that is for a different time (e.g. a night pill in the morning), tell them what the pill is, that it's for another time, and what they should take right now instead.
-- If you are not sure what a pill or bottle is, say so and suggest they check with their pharmacist or doctor."""
+- If the user asks what time it is or what the time is now, tell them their current local date and time from the context above (it is already provided for you).
+- Answer questions about this person's medication schedule (morning, afternoon, night) using the exact time windows given.
+- CRITICAL — Seeing pills or bottles: You can only see or identify a pill or bottle when the user has actually sent you an image (e.g. by turning on live video or showing it to the camera). If the user asks "can you see the aspirin I'm holding?" or "what pill is this?" or "do you see the tablet?" and you have NOT received an image in this conversation, do NOT say yes or identify anything. Say clearly that you cannot see it and ask them to turn on the live video (or show the pill/bottle to the camera) so you can look. Never guess or assume what they are holding based on voice alone.
+- When they have sent you an image of a pill or bottle, then identify it (for a pill: shape, color, and any letters or numbers on it; for a bottle: read the label). Match it to their schedule when possible.
+- If they send an image of something that is clearly NOT a pill, tablet, or medicine bottle (e.g. a phone, pen, food, random object), identify what you see in a friendly way, then say that you need to see their medication to help—e.g. "That looks like [object]. Please show me your tablet or medicine bottle so I can help you with your medications."
+- Use the current time and the time windows to say whether a pill is for "now" or for another time. If it is outside a slot's window (e.g. 3 AM and they ask about night pills), say that window has passed and what they should take in the next valid window.
+- If they show a pill for a different time, tell them what the pill is, that it's for another time window, and what they should take right now instead (if within a window).
+- If you are not sure what a pill or bottle is (after seeing an image), say so and suggest they check with their pharmacist or doctor."""
 
 
-def build_system_instruction(schedule: dict[str, Any] | None) -> str:
+def build_system_instruction(
+    schedule: dict[str, Any] | None,
+    user_timezone: str | None = None,
+) -> str:
     schedule_block = _format_schedule(schedule)
+    time_block = _format_time_windows_and_current_time(schedule, user_timezone)
     return f"""{MEDMATE_PERSONA}
+
+{time_block}
 
 This person's medication schedule:
 {schedule_block}
 
-When answering "what do I take in the morning/afternoon/night?" use the schedule above. When they show you a pill or bottle, compare it to this schedule and the current time."""
+When answering "what do I take in the morning/afternoon/night?" use the schedule and time windows above. Only recommend taking a slot's meds if the current time is within that slot's window. When they show you a pill or bottle, compare it to this schedule and the current time."""
 
 
 def get_access_token() -> str:
@@ -68,6 +120,7 @@ async def run_live_proxy(
     client_ws: Any,
     elder_id: str,
     get_schedule_fn: Any,
+    user_timezone: str | None = None,
 ) -> None:
     """Connect to Vertex Live API with MedMate system prompt and elder schedule; proxy client <-> Vertex."""
     schedule = None
@@ -97,7 +150,7 @@ async def run_live_proxy(
     url = f"wss://{LIVE_API_HOST}{LIVE_API_PATH}"
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
     model_uri = f"projects/{project}/locations/us-central1/publishers/google/models/{LIVE_MODEL}"
-    system_instruction = build_system_instruction(schedule)
+    system_instruction = build_system_instruction(schedule, user_timezone)
 
     # Match official Google demo: snake_case (generation_config, response_modalities, etc.)
     setup_message = {

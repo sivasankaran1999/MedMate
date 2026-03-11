@@ -14,11 +14,12 @@ See **[TECH_STACK.md](./TECH_STACK.md)** and **[docs/architecture.md](./docs/arc
 |----------|----------------------------------|--------------------------|
 | **AI**   | Vertex AI **Gemini Live API**   | Gemini model + Live API ✓ |
 | **Backend** | **Cloud Run** (Python)       | GCP ✓                    |
-| **Data** | **Firestore** (per-elder schedule) | GCP ✓                 |
+| **Data** | **Firestore** (per-elder schedule + users) | GCP ✓                 |
 | **Frontend** | **Next.js** (web, mic + camera) | —                    |
 
 - **Voice + vision + barge-in** in one session; **per-elder** morning/afternoon/night schedule.
 - All mandatory tech: Gemini, Live API, Google Cloud (Cloud Run + Firestore + Vertex AI).
+- **Database:** Firestore stores **elders** (schedule + time windows) and **users** (sign-in → elder). See **[docs/firestore-schema.md](./docs/firestore-schema.md)** for the full schema and hackathon alignment.
 
 ---
 
@@ -59,8 +60,9 @@ uvicorn main:app --reload --port 8080
 ```
 
 - Health: [http://localhost:8080/health](http://localhost:8080/health)
-- Schedule API: `GET/PUT http://localhost:8080/elders/{id}/schedule`
-- Live session: `ws://localhost:8080/ws?elder_id=elder-demo`
+- Sign-in: `POST http://localhost:8080/auth/login` (body: `{ "email", "password" }`)
+- Schedule: `GET/PUT http://localhost:8080/elders/{id}/schedule`
+- Live session: `ws://localhost:8080/ws?elder_id=...`
 
 ### 2. Frontend
 
@@ -74,15 +76,25 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Allow microphone and camera when prompted. Choose "Demo Elder", click **Start session**, then **Start microphone** to talk, or **Show pill or bottle** to send a camera image.
 
-### 3. Seed a test elder (optional)
+### 3. Seed database (Firestore)
 
-From the repo root, with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS` set:
+Create Firestore in your GCP project first (Native mode, e.g. `us-central1`). Then from the repo root:
 
 ```bash
+export GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+export PYTHONPATH=backend
+
+# Elders: medication schedule + time windows (morning/afternoon/night)
 python scripts/seed_elder.py [elder_id]
+
+# Users: sign-in (email/password → elder_id). Run after seed_elder.
+python scripts/seed_user.py [email] [password]
 ```
 
-Default `elder_id` is `elder-demo`. This creates one document in Firestore `elders` with sample morning/night meds. Ensure Firestore is created (Native mode, e.g. `us-central1`) in your project first.
+- Default elder: `elder-demo` with sample morning/night meds and time windows (e.g. night 8–11 PM).
+- Default user: `demo@medmate.local` / `medmate123` → links to `elder-demo`. Use these to sign in at [http://localhost:3000](http://localhost:3000).
+
+Full schema (elders + users): **[docs/firestore-schema.md](./docs/firestore-schema.md)**.
 
 ---
 

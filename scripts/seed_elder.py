@@ -16,7 +16,13 @@ from firestore_client import set_elder_schedule
 
 DEFAULT_ELDER_ID = "elder-demo"
 
+# Time windows (24h): morning 10–12, afternoon 2–4, night 8–11 (so 3 AM is NOT "night")
 SCHEDULE = {
+    "timeWindows": {
+        "morning": {"start": "10:00", "end": "12:00"},
+        "afternoon": {"start": "14:00", "end": "16:00"},
+        "night": {"start": "20:00", "end": "23:00"},
+    },
     "morning": [
         {"name": "Lisinopril", "strength": "10 mg"},
         {"name": "Vitamin D"},
