@@ -14,8 +14,12 @@ _backend_dir = Path(__file__).resolve().parent
 load_dotenv(_backend_dir / ".env")
 load_dotenv(_backend_dir / ".env.example")  # fallback if .env doesn't exist
 
+import json
+import math
 import re
 from typing import Any
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,6 +85,73 @@ def health():
 def ready():
     """Readiness for Cloud Run (same as health for now)."""
     return health()
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Approximate distance in km between two WGS84 points."""
+    R = 6371
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+
+def _fetch_nearby_pharmacies(lat: float, lon: float, radius_m: int = 5000) -> list[dict[str, Any]]:
+    """Query Overpass API for pharmacies (amenity=pharmacy) near lat, lon. Returns list of {name, lat, lon, address, distance_km, phone?}."""
+    # around: radius in meters, then lat, lon (Overpass order)
+    query = (
+        f'[out:json][timeout:15];'
+        f'(node["amenity"="pharmacy"](around:{radius_m},{lat},{lon});'
+        f' way["amenity"="pharmacy"](around:{radius_m},{lat},{lon}););'
+        f' out body center;'
+    )
+    url = "https://overpass-api.de/api/interpreter?data=" + quote(query)
+    try:
+        with urlopen(Request(url), timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch pharmacies: {e}")
+    elements = data.get("elements") or []
+    results = []
+    for el in elements:
+        tags = el.get("tags") or {}
+        name = tags.get("name") or tags.get("brand") or "Pharmacy"
+        addr = tags.get("addr:street") or tags.get("address") or ""
+        if tags.get("addr:housenumber"):
+            addr = f"{tags['addr:housenumber']} {addr}".strip()
+        if tags.get("addr:city"):
+            addr = f"{addr}, {tags['addr:city']}".strip() if addr else tags["addr:city"]
+        lat_el = el.get("lat")
+        lon_el = el.get("lon")
+        if lat_el is None and "center" in el:
+            lat_el = el["center"].get("lat")
+            lon_el = el["center"].get("lon")
+        if lat_el is None or lon_el is None:
+            continue
+        dist = _haversine_km(lat, lon, lat_el, lon_el)
+        phone = tags.get("contact:phone") or tags.get("phone") or None
+        results.append({
+            "name": name,
+            "address": addr or None,
+            "lat": lat_el,
+            "lon": lon_el,
+            "distance_km": round(dist, 2),
+            "phone": phone,
+        })
+    results.sort(key=lambda x: x["distance_km"])
+    return results[:20]
+
+
+@app.get("/api/nearby-pharmacies")
+def nearby_pharmacies(lat: float, lng: float, radius: int = 5000):
+    """Return nearby pharmacies (OpenStreetMap) for the given coordinates. radius in meters (default 5km)."""
+    if radius < 100 or radius > 50000:
+        raise HTTPException(status_code=400, detail="radius must be between 100 and 50000 meters")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(status_code=400, detail="Invalid lat or lng")
+    return {"pharmacies": _fetch_nearby_pharmacies(lat, lng, radius)}
 
 
 # Default empty schedule with time windows for new sign-ups

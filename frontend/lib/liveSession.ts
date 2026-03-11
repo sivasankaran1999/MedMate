@@ -60,6 +60,14 @@ export interface LiveSessionCallbacks {
   onCameraStream?: (stream: MediaStream | null) => void;
   /** Called when live video feed starts or stops. */
   onLiveVideoActive?: (active: boolean) => void;
+  /** Optional: assistant text transcript (when response_modalities includes TEXT). */
+  onAssistantText?: (text: string) => void;
+  /** Optional: emitted when server indicates the turn was interrupted. */
+  onInterrupted?: () => void;
+  /** Optional: input audio transcription from the server (user speech). */
+  onUserText?: (text: string) => void;
+  /** Optional: emitted when the server completes a turn. */
+  onTurnComplete?: () => void;
 }
 
 export class LiveSession {
@@ -76,6 +84,8 @@ export class LiveSession {
   private elderId: string;
   /** Set when we already showed an error from a server message, so onclose doesn't overwrite it */
   private errorShownFromMessage = false;
+  /** Guard against duplicate turnComplete events. */
+  private turnCompleteFired = false;
   /** Live video feed: interval and stream so we can stop. */
   private liveVideoIntervalId: ReturnType<typeof setInterval> | null = null;
   private liveVideoStream: MediaStream | null = null;
@@ -168,12 +178,12 @@ export class LiveSession {
         clearTimeout(timer);
         this.callbacks.onStatus?.("disconnected");
         if (!settled && ev.code !== 1000 && ev.code !== 1005) {
+          const reason =
+            ev.reason ||
+            (ev.code === 4000 || ev.code === 4010
+              ? "Backend reported an error. Check the terminal where uvicorn is running for the real message."
+              : "Connection closed.");
           if (!this.errorShownFromMessage) {
-            const reason =
-              ev.reason ||
-              (ev.code === 4000 || ev.code === 4010
-                ? "Backend reported an error. Check the terminal where uvicorn is running for the real message."
-                : "Connection closed.");
             this.callbacks.onError?.(reason);
           }
           settle(new Error(reason));
@@ -199,13 +209,55 @@ export class LiveSession {
       }
       const sc = msg.serverContent ?? msg.server_content;
       if (sc) {
+        const extractText = (v: unknown): string | null => {
+          if (!v) return null;
+          if (typeof v === "string") return v.trim() || null;
+          if (Array.isArray(v)) {
+            const parts = v.map(extractText).filter(Boolean) as string[];
+            return parts.length ? parts.join(" ").trim() : null;
+          }
+          if (typeof v === "object") {
+            const o = v as Record<string, unknown>;
+            const t =
+              (o.text as string | undefined) ??
+              (o.transcript as string | undefined) ??
+              (o.transcription as string | undefined);
+            if (typeof t === "string" && t.trim()) return t.trim();
+            // Some payloads use nested shapes; try common keys.
+            const nested =
+              o.result ?? o.results ?? o.alternatives ?? o.alternative ?? o.data ?? o.content;
+            const n = extractText(nested);
+            if (n) return n;
+          }
+          return null;
+        };
+
+        const inTr =
+          sc.inputTranscription ??
+          sc.input_transcription ??
+          sc.inputAudioTranscription ??
+          sc.input_audio_transcription;
+        const outTr =
+          sc.outputTranscription ??
+          sc.output_transcription ??
+          sc.outputAudioTranscription ??
+          sc.output_audio_transcription;
+
+        const inText = extractText(inTr);
+        const outText = extractText(outTr);
+        if (inText) this.callbacks.onUserText?.(inText);
+        if (outText) this.callbacks.onAssistantText?.(outText);
+
         if (sc.interrupted) {
           this.playbackNode?.port.postMessage("interrupt");
           this.callbacks.onVoiceState?.("idle");
+          this.callbacks.onInterrupted?.();
         }
         const modelTurn = sc.modelTurn ?? sc.model_turn;
         const parts = modelTurn?.parts;
         if (parts?.length) {
+          // New model output has started → allow a future turnComplete.
+          this.turnCompleteFired = false;
           this.callbacks.onVoiceState?.("speaking");
           for (const part of parts) {
             const inlineData = part?.inlineData ?? part?.inline_data;
@@ -213,7 +265,13 @@ export class LiveSession {
             if (data) this.playAudioChunk(data);
           }
         }
-        if (sc.turnComplete ?? sc.turn_complete) this.callbacks.onVoiceState?.("idle");
+        if (sc.turnComplete ?? sc.turn_complete) {
+          this.callbacks.onVoiceState?.("idle");
+          if (!this.turnCompleteFired) {
+            this.turnCompleteFired = true;
+            this.callbacks.onTurnComplete?.();
+          }
+        }
       }
     } catch {
       // ignore parse errors
