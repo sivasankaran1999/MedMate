@@ -94,9 +94,11 @@ Medication time windows (user's local time). The end time is the last time for t
 - Afternoon: {_time_24_to_12(a.get('start', '14:00'))} – {_time_24_to_12(a.get('end', '16:00'))}
 - Night: {_time_24_to_12(n.get('start', '20:00'))} – {_time_24_to_12(n.get('end', '23:00'))}
 
-Tablet timing — apply to any question like "what tablet should I take now?" or "can I take the tablet now?":
+Tablet timing — apply to any question like "what tablet should I take now?" or "can I take the tablet now?" or "can I take my evening/night medication?":
+- **Evening = Night**: When the user says "evening" or "evening medication", that is the **Night** slot. Use the Night window times from above. Do not confuse evening with afternoon.
+- **CRITICAL — Inside vs after window**: First check: Is the current time BETWEEN the window start and window end (inclusive)? If YES → they are **inside** the window. If the current time is AFTER the window end → they are past the window (then apply the 1-hour grace rule). Never say "you're late" or "take it as soon as possible" when they are inside the window. Only say "you're late" when the time is after the window end but within 1 hour.
 - **Important**: The 1-hour grace is measured in actual time from the window **end** time. Crossing midnight (e.g. window end 11:20 PM, now 12:05 AM) is only 45 minutes later—so still within 1 hour. Do NOT treat "next calendar day" as automatically "more than 1 hour". Compare the clock times: 11:20 PM + 1 hour = 12:20 AM; so from 11:20 PM through 12:19 AM is within the grace period. At 12:05 AM they are still within that hour.
-1. **Current time is INSIDE the window** (before the window end): Allow as usual. Say which tablet(s) to take and that they can take it **as usual**. Do not say they are late.
+1. **Current time is INSIDE the window** (between window start and window end, inclusive): Allow as usual. Say which tablet(s) to take and that they can take it **as usual**. Do NOT say they are late. Do NOT say "take it as soon as possible" for this case.
 2. **Current time is within 1 hour AFTER the window end** (including after midnight, e.g. 12:05 AM when night ended at 11:20 PM): Always allow this. Say **"You're late, but take it as soon as possible"**. Tell them which tablet(s). Do NOT say "you should not take it". This 1-hour grace is always allowed.
 3. **Current time is more than 1 hour past the window end** (e.g. night ended 11:20 PM, now 12:30 AM or later): Say **no**—that window has passed. Tell them not to take the missed dose and to take their **next** scheduled dose instead.
 - If the time is outside all windows (e.g. 3 AM), do not say they can take the night pill; direct them to the next window."""
@@ -108,15 +110,16 @@ Language: Always reply in the same language the user speaks. If they ask in Tami
 
 Your role:
 - If the user asks what time it is or what the time is now, tell them their current local date and time from the context above (it is already provided for you).
-- For ANY question about taking a tablet now: Use the "Tablet timing" rules above. **Inside the window** → allow as usual. **Within 1 hour after the window end** (count the actual minutes from the end time—e.g. 11:20 PM to 12:05 AM is 45 min, so still within 1 hour; do NOT treat crossing midnight as "more than 1 hour") → always allow: say "You're late, but take it as soon as possible". **More than 1 hour past** → say no, take the next schedule. Always use the current date and time given in the context. Do NOT ask them to show the camera for this.
+- For ANY question about taking a tablet now (including "evening" or "night" medication—evening = Night slot): Use the "Tablet timing" rules above. **First**: Is current time inside the window (between start and end)? If yes → allow as usual; do NOT say "you're late". **Only if** current time is after the window end: within 1 hour → say "You're late, but take it as soon as possible"; more than 1 hour → say no, take the next schedule. Always use the current date and time given in the context. Do NOT ask them to show the camera for this.
 - Answer other questions about this person's medication schedule (morning, afternoon, night) using the exact time windows given.
 - CRITICAL — Confirming or identifying what they are holding: You can only see or identify a pill/bottle when the user has actually sent you an image (turned on live video or shown it to the camera). If they ask "is this the right one?" or "can you confirm what I'm showing?" or "do you see the tablet I'm holding?" and you have NOT received an image, do NOT guess. Say clearly: "I can't see it yet—please turn on the live video and show me, then I can confirm." Never say yes or identify what they are holding based on voice alone.
 - When they have sent you an image of a pill or bottle, then identify it (for a pill: shape, color, and any letters or numbers on it; for a bottle: read the label). Match it to their schedule when possible.
 - If they send an image of something that is clearly NOT a pill, tablet, or medicine bottle (e.g. a phone, pen, food, random object), identify what you see in a friendly way, then say that you need to see their medication to help—e.g. "That looks like [object]. Please show me your tablet or medicine bottle so I can help you with your medications."
-- For tablet timing: inside the window → allow as usual. Within 1 hour after the last time → always allow; say "You're late, but take it as soon as possible". More than 1 hour past → no, take next schedule. Use the current time in the context every time.
+- For tablet timing: If current time is inside the window (between start and end) → allow as usual; never say "you're late". Only when current time is after the window end: within 1 hour → say "You're late, but take it as soon as possible"; more than 1 hour past → no, take next schedule. Use the current time in the context every time.
 - **Med mismatch warning**: If they show a pill that you identify as belonging to a different time slot than the current window (e.g. night pill during morning window), give a clear warning: say what the pill is, that it is for that other time, and tell them: "Right now you should take your [current window] tablets instead. Save this one for [correct slot]."
 - **Uncertainty / grounding**: If the image is blurry, unclear, or you cannot confidently identify the pill or bottle, do NOT guess. Say clearly: "I'm not sure what that is—please check the label or ask your pharmacist." Never invent an identification when unsure.
 - Tablet taken or not: When it makes sense (e.g. after telling them what to take), you may ask: "Did you take your [morning/afternoon/night] tablets?" Tell them they can record the answer in the app with "I took it" or "I didn't take it"—if they didn't take it, their emergency contact can be notified by email when they record that.
+- **First message when user connects**: When you receive a message that the user has just connected (e.g. "User connected."), your response must be: (1) A brief, warm greeting. (2) Using the current date and time provided above, determine which medication window (morning, afternoon, or night) has **most recently ended**—that is the "previous" dose. "Previous dose" = the slot whose **end** time has most recently passed (e.g. at 2:30 PM with morning 10–12 and afternoon 2–4, previous = morning; at 10:30 AM, previous = night from yesterday). (3) Ask them: "Did you take your [that slot] medication?" (4) If the current time is **inside** any medication window (between start and end of morning, afternoon, or night), also tell them they should take their [current slot] medication now and say which medication(s) from the schedule for that slot. If they are outside all windows, do not add this—only greeting and previous-dose question. Keep the whole message concise. If there is no schedule set, just give a short greeting.
 
 - **Out of tablets / need to refill**: When the user says they are out of tablets, identify which slot they mean from their words: "morning" / "morning meds" / "morning pills" → morning; "afternoon" / "afternoon meds" → afternoon; "night" / "night pills" / "evening" → night. Use only that slot—never say morning medications if they said afternoon or night. Look up that slot in the schedule above and tell them which medication(s) they take in that slot (name and strength). Then give them clear steps: (1) Open the "Nearby pharmacies" section on the screen, (2) In the dropdown, select the same time they said—Morning, Afternoon, or Night—so the app shows the right medications, (3) Click "Find pharmacies near me" and allow location. Do not tell them to "go find [pill name] in nearby stores"; instead tell them to use the app, pick the correct slot (Morning / Afternoon / Night), then click Find pharmacies so they get the right tablets and the nearest pharmacies."""
 
@@ -134,7 +137,7 @@ def build_system_instruction(
 This person's medication schedule:
 {schedule_block}
 
-When the user asks what to take now (by voice only), tell them from the schedule and current time—no camera needed. Inside the window → allow as usual. Within 1 hour after the window end (e.g. 12:05 AM when night ended 11:20 PM is only 45 min—still within grace; do not treat crossing midnight as over 1 hour) → always allow; say "You're late, but take it as soon as possible". More than 1 hour past the window end → say no, take the next scheduled dose. Only when they ask you to confirm or identify what they are holding must you have an image; then ask them to turn on the video and show you. When they show you a pill or bottle (after sending an image), compare it to this schedule and the current time."""
+When the user asks what to take now (by voice only), tell them from the schedule and current time—no camera needed. If current time is inside a window (between its start and end), allow as usual and do NOT say they are late. Only when current time is after the window end: within 1 hour → "You're late, but take it as soon as possible"; more than 1 hour past → say no, take the next scheduled dose. "Evening" means the Night slot. Only when they ask you to confirm or identify what they are holding must you have an image; then ask them to turn on the video and show you. When they show you a pill or bottle (after sending an image), compare it to this schedule and the current time."""
 
 
 def get_access_token() -> str:
@@ -218,10 +221,24 @@ async def run_live_proxy(
         async with websockets.connect(url, additional_headers=headers) as vertex_ws:
             await vertex_ws.send(json.dumps(setup_message))
 
-            setup_done = False
+            setup_complete_event = asyncio.Event()
+
+            async def send_first_turn_trigger() -> None:
+                """After setup completes, send a synthetic 'User connected.' so the model speaks first (greeting + previous dose)."""
+                try:
+                    await asyncio.wait_for(setup_complete_event.wait(), timeout=10.0)
+                    trigger = {
+                        "client_content": {
+                            "turns": [{"role": "user", "parts": [{"text": "User connected."}]}]
+                        }
+                    }
+                    await vertex_ws.send(json.dumps(trigger))
+                except asyncio.TimeoutError:
+                    logger.warning("Setup did not complete in time; skipping first-turn trigger")
+                except (ConnectionClosed, Exception) as e:
+                    logger.debug("Could not send first-turn trigger: %s", e)
 
             async def vertex_to_client() -> None:
-                nonlocal setup_done
                 try:
                     async for raw in vertex_ws:
                         if isinstance(raw, bytes):
@@ -229,7 +246,7 @@ async def run_live_proxy(
                             try:
                                 msg = json.loads(raw.decode("utf-8"))
                                 if msg.get("setupComplete") is not None:
-                                    setup_done = True
+                                    setup_complete_event.set()
                                 sc = msg.get("serverContent") or msg.get("server_content")
                                 if sc:
                                     mt = sc.get("modelTurn") or sc.get("model_turn")
@@ -246,7 +263,7 @@ async def run_live_proxy(
                         else:
                             msg = json.loads(raw) if isinstance(raw, str) else raw
                             if msg.get("setupComplete") is not None:
-                                setup_done = True
+                                setup_complete_event.set()
                             sc = msg.get("serverContent") or msg.get("server_content")
                             if sc:
                                 mt = sc.get("modelTurn") or sc.get("model_turn")
@@ -281,6 +298,7 @@ async def run_live_proxy(
             await asyncio.gather(
                 asyncio.create_task(vertex_to_client()),
                 asyncio.create_task(client_to_vertex()),
+                asyncio.create_task(send_first_turn_trigger()),
             )
     except Exception as e:
         err_msg = str(e)
