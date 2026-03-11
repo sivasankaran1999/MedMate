@@ -295,6 +295,74 @@ def get_profile(elder_id: str):
     }
 
 
+def _compute_insights(elder: dict[str, Any]) -> dict[str, Any]:
+    """Compute insight metrics from elder doc (doseHistory + schedule)."""
+    from datetime import datetime, timezone, timedelta
+    history: list[dict] = list(elder.get("doseHistory") or [])
+    schedule = elder.get("schedule") or {}
+    now = datetime.now(timezone.utc)
+    cutoff_7 = now - timedelta(days=7)
+    cutoff_30 = now - timedelta(days=30)
+
+    def parse_iso(s: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    taken_7 = missed_7 = taken_30 = missed_30 = 0
+    for entry in history:
+        at = parse_iso(entry.get("at") or "")
+        if not at:
+            continue
+        if at >= cutoff_7:
+            if entry.get("taken") is True:
+                taken_7 += 1
+            else:
+                missed_7 += 1
+        if at >= cutoff_30:
+            if entry.get("taken") is True:
+                taken_30 += 1
+            else:
+                missed_30 += 1
+
+    total_7 = taken_7 + missed_7
+    total_30 = taken_30 + missed_30
+    adherence_7 = round(100 * taken_7 / total_7, 1) if total_7 else None
+    adherence_30 = round(100 * taken_30 / total_30, 1) if total_30 else None
+
+    scheduled_per_day = 0
+    for slot in ("morning", "afternoon", "night"):
+        scheduled_per_day += len(schedule.get(slot) or [])
+    last_recorded = (elder.get("doseConfirmations") or {}).copy()
+    for k, v in list(last_recorded.items()):
+        if not isinstance(v, dict):
+            last_recorded.pop(k, None)
+
+    return {
+        "taken7d": taken_7,
+        "missed7d": missed_7,
+        "taken30d": taken_30,
+        "missed30d": missed_30,
+        "adherence7d": adherence_7,
+        "adherence30d": adherence_30,
+        "scheduledDosesPerDay": scheduled_per_day,
+        "lastRecorded": last_recorded,
+    }
+
+
+@app.get("/elders/{elder_id}/insights")
+def get_insights(elder_id: str):
+    """Return insight metrics: taken/missed counts (7d, 30d), adherence %, scheduled doses per day, last recorded per slot."""
+    try:
+        elder = get_elder(elder_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if elder is None:
+        raise HTTPException(status_code=404, detail="Elder not found")
+    return _compute_insights(elder)
+
+
 class UpdateContactsPayload(BaseModel):
     emergency_contact_name: str | None = None
     emergency_contact_email: str | None = None

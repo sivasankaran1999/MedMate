@@ -191,6 +191,8 @@ export default function Home() {
   const [confirmDoseLoading, setConfirmDoseLoading] = useState(false);
   const [confirmDoseMessage, setConfirmDoseMessage] = useState<string | null>(null);
 
+  const [dashboardTab, setDashboardTab] = useState<"session" | "schedule">("session");
+
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -206,6 +208,19 @@ export default function Home() {
   const [contactsSaving, setContactsSaving] = useState(false);
   const [contactsSaved, setContactsSaved] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+
+  type InsightsData = {
+    taken7d: number;
+    missed7d: number;
+    taken30d: number;
+    missed30d: number;
+    adherence7d: number | null;
+    adherence30d: number | null;
+    scheduledDosesPerDay: number;
+    lastRecorded: Record<string, { at?: string; taken?: boolean }>;
+  };
+  const [insights, setInsights] = useState<InsightsData | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
   const [nearbyPharmaciesSlot, setNearbyPharmaciesSlot] = useState<"morning" | "afternoon" | "night">("morning");
   const [nearbyPharmaciesLoading, setNearbyPharmaciesLoading] = useState(false);
@@ -275,6 +290,20 @@ export default function Home() {
         }
       })
       .finally(() => setProfileLoading(false));
+  }, [elderId]);
+
+  useEffect(() => {
+    if (!elderId) return;
+    setInsightsLoading(true);
+    fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/insights`)
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: InsightsData | null) => {
+        if (data) setInsights(data);
+      })
+      .finally(() => setInsightsLoading(false));
   }, [elderId]);
 
   const saveContacts = useCallback(async () => {
@@ -578,6 +607,9 @@ export default function Home() {
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Failed to record");
         setConfirmDoseMessage(taken ? "Recorded: you took it." : "Recorded: not taken. Emergency contact will be emailed if configured.");
+        fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/insights`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data: InsightsData | null) => { if (data) setInsights(data); });
       } catch (e) {
         setConfirmDoseMessage(e instanceof Error ? e.message : "Could not record.");
       } finally {
@@ -908,6 +940,34 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className="relative flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+              <button
+                type="button"
+                onClick={() => setDashboardTab("session")}
+                className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                  dashboardTab === "session"
+                    ? "bg-cyan-500/20 text-cyan-200 shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Session
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardTab("schedule")}
+                className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                  dashboardTab === "schedule"
+                    ? "bg-cyan-500/20 text-cyan-200 shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Schedule & more
+              </button>
+            </div>
+
+            {dashboardTab === "session" ? (
+            <>
             {/* Now — always-on summary */}
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
               <SectionTitle
@@ -1060,6 +1120,211 @@ export default function Home() {
                   Interruption demo: start talking while MedMate is speaking — you’ll see “Interrupted”.
                 </span>
               </div>
+            </div>
+
+            {/* Tablet taken? — in Session tab so user can record without switching */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
+              <SectionTitle
+                title="Tablet taken?"
+                subtitle="Pick the dose (morning / afternoon / night) and record whether you took it. If you didn't, we can email your emergency contact."
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={confirmDoseSlot}
+                  onChange={(e) => {
+                    setConfirmDoseSlot(e.target.value as "morning" | "afternoon" | "night");
+                    setConfirmDoseMessage(null);
+                  }}
+                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                >
+                  {SLOTS.map((s) => (
+                    <option key={s} value={s} className="bg-[#0a0a0f] text-white">
+                      {s.charAt(0).toUpperCase() + s.slice(1)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => confirmDose(true)}
+                  disabled={confirmDoseLoading}
+                  className="h-11 px-5 rounded-xl bg-emerald-500/15 text-emerald-200 font-semibold text-sm hover:bg-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 disabled:opacity-70"
+                >
+                  I took it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => confirmDose(false)}
+                  disabled={confirmDoseLoading}
+                  className="h-11 px-5 rounded-xl bg-amber-500/15 text-amber-200 font-semibold text-sm hover:bg-amber-500/20 focus:outline-none focus:ring-2 focus:ring-amber-500/40 disabled:opacity-70"
+                >
+                  I didn't take it
+                </button>
+              </div>
+              {confirmDoseMessage && (
+                <p className="text-xs text-zinc-400">{confirmDoseMessage}</p>
+              )}
+            </div>
+
+            {/* Status */}
+            <div className="flex flex-col gap-3">
+              {error && (
+                <div
+                  className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400 font-medium"
+                  role="alert"
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-3 pt-2">
+              {!isConnected ? (
+                <button
+                  type="button"
+                  onClick={connect}
+                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                  aria-label="Start session"
+                >
+                  Start session
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={voiceState === "listening" ? stopMic : startMic}
+                    className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
+                      voiceState === "listening"
+                        ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
+                        : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
+                    }`}
+                    aria-label={
+                      voiceState === "listening"
+                        ? "Stop microphone"
+                        : "Start microphone"
+                    }
+                    aria-pressed={voiceState === "listening"}
+                  >
+                    {voiceState === "listening"
+                      ? "Stop microphone"
+                      : "Start microphone"}
+                  </button>
+                  {cameraStream && (
+                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
+                      <video
+                        ref={cameraVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        aria-label="Camera preview"
+                      />
+                      <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
+                        {liveVideoActive ? "Sending live feed at 1 FPS…" : "Position pill or bottle, then we'll capture…"}
+                      </p>
+                    </div>
+                  )}
+                  {!liveVideoActive ? (
+                    <button
+                      type="button"
+                      onClick={startLiveVideo}
+                      disabled={cameraOpening}
+                      className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
+                      aria-label="Start live video feed"
+                    >
+                      {cameraOpening ? "Opening camera…" : "Start live video"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopLiveVideo}
+                      className="h-14 w-full rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-semibold text-lg shadow-lg shadow-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                      aria-label="Stop live video feed"
+                    >
+                      Stop live video
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={disconnect}
+                    className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                    aria-label="End session"
+                  >
+                    End session
+                  </button>
+                </>
+              )}
+            </div>
+            </>
+            ) : (
+            <>
+            <p className="text-sm text-zinc-400">
+              Use the <button type="button" onClick={() => setDashboardTab("session")} className="text-cyan-400 hover:text-cyan-300 underline font-medium">Session</button> tab to talk to MedMate and control the mic.
+            </p>
+
+            {/* Insights */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+                Insights
+              </h2>
+              <p className="text-xs text-zinc-500">
+                Track how often you take or miss doses. Record with &quot;I took it&quot; / &quot;I didn&apos;t take it&quot; below to update.
+              </p>
+              {insightsLoading ? (
+                <p className="text-sm text-zinc-500">Loading…</p>
+              ) : insights ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">Taken (7d)</p>
+                    <p className="text-xl font-bold text-emerald-200">{insights.taken7d}</p>
+                  </div>
+                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">Missed (7d)</p>
+                    <p className="text-xl font-bold text-red-200">{insights.missed7d}</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">Taken (30d)</p>
+                    <p className="text-xl font-bold text-emerald-200">{insights.taken30d}</p>
+                  </div>
+                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">Missed (30d)</p>
+                    <p className="text-xl font-bold text-red-200">{insights.missed30d}</p>
+                  </div>
+                  {(insights.adherence7d != null || insights.adherence30d != null) && (
+                    <>
+                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+                        <p className="text-xs text-zinc-500 uppercase tracking-wide">Adherence (7d)</p>
+                        <p className="text-xl font-bold text-cyan-200">{insights.adherence7d ?? "—"}%</p>
+                      </div>
+                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+                        <p className="text-xs text-zinc-500 uppercase tracking-wide">Adherence (30d)</p>
+                        <p className="text-xl font-bold text-cyan-200">{insights.adherence30d ?? "—"}%</p>
+                      </div>
+                    </>
+                  )}
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 col-span-2 sm:col-span-4">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wide">Scheduled doses per day</p>
+                    <p className="text-lg font-semibold text-zinc-200">{insights.scheduledDosesPerDay}</p>
+                  </div>
+                  {Object.keys(insights.lastRecorded).length > 0 && (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 col-span-2 sm:col-span-4 space-y-1">
+                      <p className="text-xs text-zinc-500 uppercase tracking-wide">Last recorded</p>
+                      {(["morning", "afternoon", "night"] as const).map((slot) => {
+                        const r = insights.lastRecorded[slot];
+                        if (!r) return null;
+                        const at = r.at ? new Date(r.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : "";
+                        return (
+                          <p key={slot} className="text-sm text-zinc-300">
+                            <span className="capitalize">{slot}</span>: {r.taken ? "Taken" : "Missed"}{at ? ` at ${at}` : ""}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-500">No insights yet. Record &quot;I took it&quot; or &quot;I didn&apos;t take it&quot; to start tracking.</p>
+              )}
             </div>
 
             {/* My medications — so the agent knows what you take and when */}
@@ -1230,49 +1495,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Tablet taken? — record dose and optionally notify emergency contact */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
-              <SectionTitle
-                title="Tablet taken?"
-                subtitle="Pick the dose (morning / afternoon / night) and record whether you took it. If you didn’t, we can email your emergency contact."
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  value={confirmDoseSlot}
-                  onChange={(e) => {
-                    setConfirmDoseSlot(e.target.value as "morning" | "afternoon" | "night");
-                    setConfirmDoseMessage(null);
-                  }}
-                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
-                >
-                  {SLOTS.map((s) => (
-                    <option key={s} value={s} className="bg-[#0a0a0f] text-white">
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => confirmDose(true)}
-                  disabled={confirmDoseLoading}
-                  className="h-11 px-5 rounded-xl bg-emerald-500/15 text-emerald-200 font-semibold text-sm hover:bg-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 disabled:opacity-70"
-                >
-                  I took it
-                </button>
-                <button
-                  type="button"
-                  onClick={() => confirmDose(false)}
-                  disabled={confirmDoseLoading}
-                  className="h-11 px-5 rounded-xl bg-amber-500/15 text-amber-200 font-semibold text-sm hover:bg-amber-500/20 focus:outline-none focus:ring-2 focus:ring-amber-500/40 disabled:opacity-70"
-                >
-                  I didn’t take it
-                </button>
-              </div>
-              {confirmDoseMessage && (
-                <p className="text-xs text-zinc-400">{confirmDoseMessage}</p>
-              )}
-            </div>
-
             {/* Refill flow — guided: out of [slot] tablets → select slot → Find pharmacies → 3 best options + CTAs */}
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
               <SectionTitle
@@ -1378,96 +1600,8 @@ export default function Home() {
               )}
             </div>
 
-            {/* Status */}
-            <div className="flex flex-col gap-3">
-              {error && (
-                <div
-                  className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400 font-medium"
-                  role="alert"
-                >
-                  {error}
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-col gap-3 pt-2">
-              {!isConnected ? (
-                <button
-                  type="button"
-                  onClick={connect}
-                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                  aria-label="Start session"
-                >
-                  Start session
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={voiceState === "listening" ? stopMic : startMic}
-                    className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
-                      voiceState === "listening"
-                        ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
-                        : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
-                    }`}
-                    aria-label={
-                      voiceState === "listening"
-                        ? "Stop microphone"
-                        : "Start microphone"
-                    }
-                    aria-pressed={voiceState === "listening"}
-                  >
-                    {voiceState === "listening"
-                      ? "Stop microphone"
-                      : "Start microphone"}
-                  </button>
-                  {cameraStream && (
-                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
-                      <video
-                        ref={cameraVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover"
-                        aria-label="Camera preview"
-                      />
-                      <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
-                        {liveVideoActive ? "Sending live feed at 1 FPS…" : "Position pill or bottle, then we'll capture…"}
-                      </p>
-                    </div>
-                  )}
-                  {!liveVideoActive ? (
-                    <button
-                      type="button"
-                      onClick={startLiveVideo}
-                      disabled={cameraOpening}
-                      className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
-                      aria-label="Start live video feed"
-                    >
-                      {cameraOpening ? "Opening camera…" : "Start live video"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={stopLiveVideo}
-                      className="h-14 w-full rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-semibold text-lg shadow-lg shadow-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                      aria-label="Stop live video feed"
-                    >
-                      Stop live video
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={disconnect}
-                    className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                    aria-label="End session"
-                  >
-                    End session
-                  </button>
-                </>
-              )}
-            </div>
+            </>
+            )}
           </section>
 
           <p className="text-center text-xs text-zinc-600 font-medium">

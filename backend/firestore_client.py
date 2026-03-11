@@ -91,8 +91,12 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
     return doc.to_dict()
 
 
+# Max entries to keep in doseHistory for insights (e.g. ~90 days at 3 slots/day)
+DOSE_HISTORY_CAP = 500
+
+
 def record_dose_confirmation(elder_id: str, slot: str, taken: bool) -> dict[str, Any] | None:
-    """Record that the user confirmed (or did not take) a dose for the given slot. Returns emergency contact dict if they have an email (so we can notify for both taken and not taken)."""
+    """Record that the user confirmed (or did not take) a dose for the given slot. Updates doseConfirmations (last per slot) and appends to doseHistory for insights. Returns emergency contact dict if they have an email."""
     if slot not in ("morning", "afternoon", "night"):
         return None
     db = _get_db()
@@ -102,9 +106,14 @@ def record_dose_confirmation(elder_id: str, slot: str, taken: bool) -> dict[str,
         return None
     data = doc.to_dict() or {}
     from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
     confirmations = dict(data.get("doseConfirmations") or {})
-    confirmations[slot] = {"at": datetime.now(timezone.utc).isoformat(), "taken": taken}
-    ref.set({"doseConfirmations": confirmations}, merge=True)
+    confirmations[slot] = {"at": now_iso, "taken": taken}
+    history: list[dict[str, Any]] = list(data.get("doseHistory") or [])
+    history.append({"slot": slot, "at": now_iso, "taken": taken})
+    if len(history) > DOSE_HISTORY_CAP:
+        history = history[-DOSE_HISTORY_CAP:]
+    ref.set({"doseConfirmations": confirmations, "doseHistory": history}, merge=True)
     ec = data.get("emergencyContact") or data.get("emergency_contact")
     email = (ec.get("email") or "").strip() if isinstance(ec, dict) else ""
     if isinstance(ec, dict) and email:

@@ -22,6 +22,7 @@ Stores each person’s medication schedule. Document ID = elder ID (e.g. `elder-
 | `emergencyContact` | map | Optional. `{ "name": string, "email": string }` — family/contact to notify by email when a dose is not taken. |
 | `pharmacistContact` | map | Optional. `{ "name"?, "email"?, "phone"?: string }` — pharmacist or pharmacy contact. |
 | `doseConfirmations` | map | Optional. Per-slot confirmation: `morning` / `afternoon` / `night` → `{ "at": ISO8601, "taken": bool }`. |
+| `doseHistory` | array | Optional. History of confirmations for insights: `[{ "slot": "morning"|"afternoon"|"night", "at": ISO8601, "taken": bool }, ...]` (capped at 500). |
 | `lastKnownLocation` | map | Optional. `{ "lat", "lng", "updatedAt" }` for future use. |
 
 **Example**
