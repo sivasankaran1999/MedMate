@@ -1657,7 +1657,9 @@ export default function Home() {
                         aria-label="Camera preview"
                       />
                       <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
-                        {liveVideoActive ? "Sending live feed at 1 FPS…" : "Position pill or bottle, then we'll capture…"}
+                        {liveVideoActive
+                          ? "Live feed on. MedMate will guide you until it can read the pill or label—then it will tell you what it is and if it's the right time."
+                          : "Position pill or bottle. When you start live video, MedMate will guide you (e.g. tilt, move closer) until it can read the imprint or label."}
                       </p>
                     </div>
                   )}
