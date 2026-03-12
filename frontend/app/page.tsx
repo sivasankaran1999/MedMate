@@ -168,6 +168,12 @@ export default function Home() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [liveVideoActive, setLiveVideoActive] = useState(false);
   const [session, setSession] = useState<LiveSession | null>(null);
+  /** When true, user has already requested end once; next End click will actually disconnect. */
+  const [pendingEndSession, setPendingEndSession] = useState(false);
+  /** When true, agent has already asked mandatory questions and user answered; one End click ends directly. */
+  const [mandatoryQuestionsAnswered, setMandatoryQuestionsAnswered] = useState(false);
+  /** True when user has started the mic; stays true until they click Stop or session ends (so button stays "Stop microphone" while agent speaks). */
+  const [isMicOn, setIsMicOn] = useState(false);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
 
   const [loginEmail, setLoginEmail] = useState("");
@@ -521,6 +527,9 @@ export default function Home() {
             if (last?.role === "assistant" && last.text.trim() === finalText) return t;
             return [...t, { role: "assistant", text: finalText, ts: Date.now() }];
           });
+          if (/all set|end the session when ready|you can end the session/i.test(finalText)) {
+            setMandatoryQuestionsAnswered(true);
+          }
         }
         return "";
       });
@@ -538,16 +547,20 @@ export default function Home() {
   const disconnect = useCallback(() => {
     session?.disconnect();
     setSession(null);
+    setPendingEndSession(false);
+    setMandatoryQuestionsAnswered(false);
+    setIsMicOn(false);
   }, [session]);
 
-  const handleEndSession = useCallback(() => {
-    disconnect();
+  const doEndSession = useCallback(() => {
     setSessionSummary(null);
     setSessionSummaryError(null);
     if (!elderId || transcript.length === 0) {
+      disconnect();
       return;
     }
     setSessionSummaryLoading(true);
+    disconnect();
     fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/session-summary`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -571,12 +584,32 @@ export default function Home() {
       .finally(() => setSessionSummaryLoading(false));
   }, [disconnect, elderId, transcript]);
 
+  const handleEndSession = useCallback(() => {
+    if (status !== "connected" || !session) {
+      doEndSession();
+      return;
+    }
+    if (mandatoryQuestionsAnswered) {
+      doEndSession();
+      return;
+    }
+    if (pendingEndSession) {
+      doEndSession();
+      return;
+    }
+    session.sendUserText("I want to end the session.", true);
+    setTranscript((t) => [...t, { role: "user", text: "I want to end the session.", ts: Date.now() }]);
+    setPendingEndSession(true);
+  }, [status, session, mandatoryQuestionsAnswered, pendingEndSession, doEndSession]);
+
   const startMic = useCallback(() => {
     session?.startMic();
+    setIsMicOn(true);
   }, [session]);
 
   const stopMic = useCallback(() => {
     session?.stopMic();
+    setIsMicOn(false);
   }, [session]);
 
   // Update "Now" clock every 10s.
@@ -1467,22 +1500,16 @@ export default function Home() {
                 <>
                   <button
                     type="button"
-                    onClick={voiceState === "listening" ? stopMic : startMic}
+                    onClick={isMicOn ? stopMic : startMic}
                     className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
-                      voiceState === "listening"
+                      isMicOn
                         ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
                         : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
                     }`}
-                    aria-label={
-                      voiceState === "listening"
-                        ? "Stop microphone"
-                        : "Start microphone"
-                    }
-                    aria-pressed={voiceState === "listening"}
+                    aria-label={isMicOn ? "Stop microphone" : "Start microphone"}
+                    aria-pressed={isMicOn}
                   >
-                    {voiceState === "listening"
-                      ? "Stop microphone"
-                      : "Start microphone"}
+                    {isMicOn ? "Stop microphone" : "Start microphone"}
                   </button>
                   {cameraStream && (
                     <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
@@ -1519,13 +1546,18 @@ export default function Home() {
                       Stop live video
                     </button>
                   )}
+                  {pendingEndSession && (
+                    <p className="text-sm text-amber-200/90">
+                      Answer MedMate&apos;s questions, then click End session again to leave.
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={handleEndSession}
                     className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
                     aria-label="End session"
                   >
-                    End session
+                    {pendingEndSession ? "End session (click again to leave)" : "End session"}
                   </button>
                 </>
               )}

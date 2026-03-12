@@ -303,6 +303,18 @@ export class LiveSession {
     }
   }
 
+  /** Send a user text message to the agent (e.g. when user clicks End session). Set turnComplete true so the model generates an audio response. */
+  sendUserText(text: string, turnComplete = false): void {
+    if (!text.trim()) return;
+    const payload: { client_content: { turns: Array<{ role: string; parts: Array<{ text: string }> }>; turn_complete?: boolean } } = {
+      client_content: {
+        turns: [{ role: "user", parts: [{ text: text.trim() }] }],
+      },
+    };
+    if (turnComplete) payload.client_content.turn_complete = true;
+    this.send(payload);
+  }
+
   /** Send any buffered audio to the worklet so short responses still play. */
   private flushPlaybackBuffer(): void {
     if (!this.playbackNode || this.playbackBuffer.length === 0) return;
