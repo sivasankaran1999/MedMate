@@ -383,21 +383,53 @@ export class LiveSession {
       this.callbacks.onError?.("Microphone not available. Please allow mic access.");
       return;
     }
-    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
+    const ctx = new (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)({
       sampleRate: SAMPLE_RATE_CAPTURE,
     });
     this.audioContext = ctx;
-    await ctx.audioWorklet.addModule("/audio-processors/capture.worklet.js");
-    this.captureNode = new AudioWorkletNode(ctx, "audio-capture-processor");
-    this.captureNode.port.onmessage = (e) => {
-      if (e.data?.type === "audio" && e.data.data && this.isCapturing && this.ws?.readyState === WebSocket.OPEN) {
-        const pcm = float32ToPCM16(e.data.data as Float32Array);
+    const src = ctx.createMediaStreamSource(this.mediaStream);
+
+    // Some browsers / environments can throw:
+    // "AudioWorkletNode cannot be created: No execution context available."
+    // In that case, fall back to ScriptProcessorNode for capture so the demo still works.
+    try {
+      // Ensure the context is running (required in many browsers before creating worklets)
+      if (ctx.state === "suspended") await ctx.resume();
+      if (!ctx.audioWorklet) throw new Error("AudioWorklet not available");
+      await ctx.audioWorklet.addModule("/audio-processors/capture.worklet.js");
+      this.captureNode = new AudioWorkletNode(ctx, "audio-capture-processor");
+      this.captureNode.port.onmessage = (e) => {
+        if (e.data?.type === "audio" && e.data.data && this.isCapturing && this.ws?.readyState === WebSocket.OPEN) {
+          const pcm = float32ToPCM16(e.data.data as Float32Array);
+          const base64 = arrayBufferToBase64(pcm);
+          this.send({ realtime_input: { media_chunks: [{ mime_type: "audio/pcm", data: base64 }] } });
+        }
+      };
+      src.connect(this.captureNode);
+    } catch (err) {
+      // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const silence = ctx.createGain();
+      silence.gain.value = 0;
+      processor.onaudioprocess = (ev) => {
+        if (!this.isCapturing || this.ws?.readyState !== WebSocket.OPEN) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        // Copy buffer because underlying storage is reused by the browser
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        const pcm = float32ToPCM16(copy);
         const base64 = arrayBufferToBase64(pcm);
         this.send({ realtime_input: { media_chunks: [{ mime_type: "audio/pcm", data: base64 }] } });
-      }
-    };
-    const src = ctx.createMediaStreamSource(this.mediaStream);
-    src.connect(this.captureNode);
+      };
+      src.connect(processor);
+      processor.connect(silence);
+      silence.connect(ctx.destination);
+      this.callbacks.onError?.(
+        `Mic capture fell back to compatibility mode (AudioWorklet unavailable). If this persists, reload the page.`
+      );
+    }
+
     this.isCapturing = true;
     this.callbacks.onVoiceState?.("listening");
   }

@@ -243,7 +243,27 @@ def register(body: RegisterPayload):
 @app.post("/auth/login")
 def login(body: LoginPayload):
     """Sign in with email and password. Returns elder_id and display_name for the session."""
-    user = get_user_by_email(body.email)
+    import logging
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(get_user_by_email, body.email)
+            try:
+                user = fut.result(timeout=15)
+            except FuturesTimeoutError:
+                logging.getLogger("uvicorn.error").warning("Login: Firestore/auth timed out after 15s")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database connection timed out. Run 'gcloud auth application-default login' in the backend terminal, then restart. See backend/LOCAL-DEV.md.",
+                ) from None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.getLogger("uvicorn.error").exception("Login failed (Firestore/credentials)")
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable. Run 'gcloud auth application-default login' in this terminal, then restart the backend. See backend/LOCAL-DEV.md.",
+        ) from e
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.get("password") != body.password:
@@ -348,8 +368,22 @@ class TranscriptEntry(BaseModel):
     text: str
 
 
+class CaregiverPharmacyOption(BaseModel):
+    name: str
+    address: str | None = None
+    distance_km: float | None = None
+    url: str | None = None
+
+
+class RefillSummaryPayload(BaseModel):
+    slot: str  # "morning" | "afternoon" | "night"
+    reason: str
+    top_pharmacies: list[CaregiverPharmacyOption] = []
+
+
 class SessionSummaryPayload(BaseModel):
     transcript: list[TranscriptEntry]
+    refill: RefillSummaryPayload | None = None
 
 
 def _send_email(to_email: str, subject: str, body_text: str) -> None:
@@ -495,10 +529,30 @@ def session_summary(elder_id: str, body: SessionSummaryPayload):
     caretaker_name = (ec.get("name") or "Caretaker").strip() if isinstance(ec, dict) else "Caretaker"
     transcript_data = [{"role": e.role, "text": e.text} for e in body.transcript]
     summary = _summarize_transcript_for_caretaker(transcript_data)
+
+    refill_block = ""
+    if body.refill is not None:
+        slot = (body.refill.slot or "").strip().lower() or "unknown"
+        reason = (body.refill.reason or "").strip()
+        refill_block = f"\n\nRefill alert: {display_name} indicated they may be out of tablets ({slot})."
+        if reason:
+            refill_block += f"\nReason/context (from transcript): {reason}"
+        if body.refill.top_pharmacies:
+            refill_block += "\nTop nearby pharmacies:"
+            for i, p in enumerate(body.refill.top_pharmacies[:3], start=1):
+                line = f"\n{i}. {p.name}"
+                if p.distance_km is not None:
+                    line += f" ({p.distance_km:.2f} km)"
+                if p.address:
+                    line += f" — {p.address}"
+                if p.url:
+                    line += f"\n   Refill/checkout: {p.url}"
+                refill_block += line
+
     sent_to: str | None = None
     if caretaker_email:
         subject = f"MedMate session summary for {display_name}"
-        body_text = f"Hello {caretaker_name},\n\nHere is a summary of the recent MedMate conversation with {display_name}:\n\n{summary}\n\n— MedMate"
+        body_text = f"Hello {caretaker_name},\n\nHere is a summary of the recent MedMate conversation with {display_name}:\n\n{summary}{refill_block}\n\n— MedMate"
         _send_email(caretaker_email, subject, body_text)
         sent_to = caretaker_email
     return {"summary": summary, "sent_to": sent_to}

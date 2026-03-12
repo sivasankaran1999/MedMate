@@ -253,6 +253,12 @@ export default function Home() {
   type PharmacyRow = { name: string; address?: string | null; lat: number; lon: number; distance_km: number; phone?: string | null };
   const [pharmaciesList, setPharmaciesList] = useState<Array<PharmacyRow> | null>(null);
   const [refillTabletsQuantity, setRefillTabletsQuantity] = useState<string>("");
+  const [refillForCaregiver, setRefillForCaregiver] = useState<{
+    slot: "morning" | "afternoon" | "night";
+    reason: string;
+    top_pharmacies: Array<{ name: string; address?: string | null; distance_km?: number | null; url?: string | null }>;
+  } | null>(null);
+  const refillPromptedRef = useRef(false);
 
   const [nowTime, setNowTime] = useState<Date>(() => new Date());
   const [interruptionFlag, setInterruptionFlag] = useState(false);
@@ -354,15 +360,20 @@ export default function Home() {
     e.preventDefault();
     setLoginError(null);
     setLoginLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch(`${httpBase}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.detail || res.statusText || "Login failed");
+        const detail = typeof (d as { detail?: string }).detail === "string" ? (d as { detail: string }).detail : res.statusText;
+        throw new Error(detail || "Login failed");
       }
       const data = await res.json();
       const id = data.elder_id;
@@ -373,8 +384,13 @@ export default function Home() {
       setElderId(id);
       setDisplayName(name);
     } catch (err) {
-      setLoginError(err instanceof Error ? err.message : "Login failed");
+      if (err instanceof Error && err.name === "AbortError") {
+        setLoginError("Connection timed out. Is the backend running on port 8080? If yes, run backend/check_credentials.py (see LOCAL-DEV.md).");
+      } else {
+        setLoginError(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoginLoading(false);
     }
   }, [loginEmail, loginPassword]);
@@ -547,6 +563,56 @@ export default function Home() {
     onUserText: (text) => {
       if (!captionsEnabled) return;
       setTranscript((t) => [...t, { role: "user", text, ts: Date.now() }]);
+
+      // Option B: automatic refill detection → ask location once → fetch top pharmacies for caregiver email.
+      if (!refillPromptedRef.current && /(refill|run(?:ning)? out|ran out|out of (?:my )?(?:tablet|tablets|medicine|meds|pills)|no (?:tablet|tablets|medicine|meds|pills) left|need more)/i.test(text)) {
+        refillPromptedRef.current = true;
+        const lower = text.toLowerCase();
+        const slot: "morning" | "afternoon" | "night" =
+          lower.includes("afternoon") ? "afternoon" : lower.includes("night") || lower.includes("evening") ? "night" : "morning";
+        const ok = window.confirm(
+          "MedMate can use your location to suggest nearby pharmacies and include the top options in the caregiver email summary. Allow location?"
+        );
+        if (!ok) {
+          setRefillForCaregiver({ slot, reason: text, top_pharmacies: [] });
+          return;
+        }
+        if (!navigator.geolocation) {
+          setRefillForCaregiver({ slot, reason: text, top_pharmacies: [] });
+          setError("Location not supported in this browser. You can still use the refill section manually.");
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const latitude = pos.coords.latitude;
+              const longitude = pos.coords.longitude;
+              const res = await fetch(
+                `${httpBase}/api/nearby-pharmacies?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&radius=5000`
+              );
+              const data = (await res.json().catch(() => null)) as { pharmacies?: PharmacyRow[] } | null;
+              const list = Array.isArray(data?.pharmacies) ? data!.pharmacies : [];
+              const top = list.slice(0, 3).map((p) => ({
+                name: p.name,
+                address: p.address ?? null,
+                distance_km: typeof p.distance_km === "number" ? p.distance_km : null,
+                url: getRefillCheckoutUrl(p.name),
+              }));
+              setRefillForCaregiver({ slot, reason: text, top_pharmacies: top });
+              // Also populate the UI list so user sees suggestions immediately.
+              setNearbyPharmaciesSlot(slot);
+              setPharmaciesList(list);
+            } catch {
+              setRefillForCaregiver({ slot, reason: text, top_pharmacies: [] });
+            }
+          },
+          () => {
+            setRefillForCaregiver({ slot, reason: text, top_pharmacies: [] });
+            setError("Location permission denied. You can still use the refill section manually.");
+          },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+        );
+      }
     },
     onInterrupted: () => {
       setInterruptionFlag(true);
@@ -601,6 +667,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         transcript: transcript.map(({ role, text }) => ({ role, text })),
+        refill: refillForCaregiver,
       }),
     })
       .then(async (res) => {
@@ -617,7 +684,7 @@ export default function Home() {
         setSessionSummaryError(err instanceof Error ? err.message : "Failed to generate summary");
       })
       .finally(() => setSessionSummaryLoading(false));
-  }, [disconnect, elderId, transcript]);
+  }, [disconnect, elderId, transcript, refillForCaregiver]);
 
   const handleEndSession = useCallback(() => {
     if (status !== "connected" || !session) {
