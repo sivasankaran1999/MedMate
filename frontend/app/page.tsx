@@ -39,10 +39,31 @@ function voiceLabel(v: VoiceState): string {
   }
 }
 
+/** Renders text with URLs as clickable links (for transcript so agent can "take user to" a pharmacy page). */
+function linkifyText(text: string) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) =>
+    part.startsWith("http") ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline text-cyan-300 hover:text-cyan-200 break-all"
+      >
+        {part}
+      </a>
+    ) : (
+      part
+    )
+  );
+}
+
 /** Returns refill/checkout page URL for known chains; otherwise Google search for "[name] pharmacy refill". */
 function getRefillCheckoutUrl(pharmacyName: string): string {
   const n = pharmacyName.toLowerCase();
-  if (n.includes("cvs")) return "https://www.cvs.com/pharmacy/refill";
+  if (n.includes("cvs")) return "https://www.cvs.com/pharmacy";
   if (n.includes("walgreens")) return "https://www.walgreens.com/pharmacy/refill";
   if (n.includes("rite aid")) return "https://www.riteaid.com/pharmacy/refill-prescriptions";
   if (n.includes("walmart")) return "https://www.walmart.com/pharmacy/refill";
@@ -1117,14 +1138,14 @@ export default function Home() {
                                 : "max-w-[90%] rounded-2xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
                           }
                         >
-                          {m.text}
+                          {linkifyText(m.text)}
                         </div>
                       </div>
                     ))}
                     {assistantDraft ? (
                       <div className="flex justify-start">
                         <div className="max-w-[90%] rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-zinc-200 opacity-80">
-                          {assistantDraft}
+                          {linkifyText(assistantDraft)}
                         </div>
                       </div>
                     ) : null}
