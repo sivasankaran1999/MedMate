@@ -343,6 +343,167 @@ class ConfirmDosePayload(BaseModel):
     taken: bool
 
 
+class TranscriptEntry(BaseModel):
+    role: str
+    text: str
+
+
+class SessionSummaryPayload(BaseModel):
+    transcript: list[TranscriptEntry]
+
+
+def _send_email(to_email: str, subject: str, body_text: str) -> None:
+    """Send a single email via SMTP. No-op if SMTP not configured."""
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        import logging
+        logging.getLogger("uvicorn.error").info("SMTP not configured; skipping email")
+        return
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASSWORD", "")
+    from_addr = os.environ.get("FROM_EMAIL", user or "medmate@localhost").strip()
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_email
+    msg.attach(MIMEText(body_text, "plain"))
+    try:
+        with smtplib.SMTP(host, port) as s:
+            if port == 587:
+                s.starttls()
+            if user and password:
+                s.login(user, password)
+            s.sendmail(from_addr, [to_email], msg.as_string())
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").warning("Failed to send email: %s", e)
+
+
+def _summarize_transcript_for_caretaker(transcript: list[dict[str, str]]) -> str:
+    """Call Vertex AI Gemini to summarize the conversation for a caretaker. Returns summary text."""
+    lines = []
+    for entry in transcript:
+        role = (entry.get("role") or "user").lower()
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+        if role == "assistant":
+            lines.append(f"MedMate: {text}")
+        elif role == "user":
+            lines.append(f"User: {text}")
+        else:
+            lines.append(text)
+    conversation = "\n".join(lines) if lines else "No conversation."
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1").strip()
+    _fallback = "Session ended. A brief summary could not be generated for this session."
+    _log = __import__("logging").getLogger("uvicorn.error")
+    if not project:
+        _log.warning("Session summary: GOOGLE_CLOUD_PROJECT not set")
+        return _fallback
+    prompt = f"""Summarize this conversation between an elderly user and a medication assistant (MedMate) for a family caretaker. Be concise. Include:
+- What was discussed (medications, doses, timing)
+- Whether any doses were taken or missed
+- Any concerns or follow-ups mentioned
+Keep the summary to a short paragraph.
+
+Conversation:
+{conversation}"""
+
+    # Try Google GenAI SDK (Vertex AI) first
+    try:
+        from google import genai
+        client = genai.Client(vertexai=True, project=project, location=location)
+        for model_id in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-002"):
+            try:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                )
+                if response is None:
+                    continue
+                text = getattr(response, "text", None) if response else None
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+            except Exception as model_err:
+                _log.info("Session summary: model %s failed: %s", model_id, model_err)
+                continue
+    except ImportError:
+        _log.info("Session summary: google-genai not installed, using REST")
+    except Exception as e:
+        _log.warning("Session summary: SDK failed: %s", e)
+
+    # Fallback: REST API with ADC
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        creds, _ = google.auth.default()
+        if not creds.valid:
+            creds.refresh(google.auth.transport.requests.Request())
+        token = creds.token
+        url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{quote(project, safe='')}/locations/{quote(location, safe='')}/publishers/google/models/gemini-1.5-flash:generateContent"
+        body = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},
+        }
+        req = Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        err = data.get("error")
+        if err:
+            _log.warning("Session summary: Vertex API error: %s", err.get("message") or err)
+            return _fallback
+        candidates = data.get("candidates") or []
+        if not candidates:
+            _log.warning("Session summary: Vertex API returned no candidates (e.g. safety block). Response keys: %s", list(data.keys()))
+            return _fallback
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        if not parts:
+            _log.warning("Session summary: Vertex API returned candidate with no parts")
+            return _fallback
+        text = (parts[0].get("text") or "").strip()
+        return text if text else _fallback
+    except Exception as e:
+        _log.warning("Session summary generation failed: %s", e)
+        return _fallback
+
+
+@app.post("/elders/{elder_id}/session-summary")
+def session_summary(elder_id: str, body: SessionSummaryPayload):
+    """Summarize the session transcript and email it to the caretaker. Returns summary and sent_to."""
+    try:
+        elder = get_elder(elder_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if elder is None:
+        raise HTTPException(status_code=404, detail="Elder not found")
+    display_name = (elder.get("displayName") or elder.get("display_name") or "Your family member").strip()
+    ec = elder.get("emergencyContact") or elder.get("emergency_contact") or {}
+    caretaker_email = (ec.get("email") or "").strip().lower() if isinstance(ec, dict) else ""
+    caretaker_name = (ec.get("name") or "Caretaker").strip() if isinstance(ec, dict) else "Caretaker"
+    transcript_data = [{"role": e.role, "text": e.text} for e in body.transcript]
+    summary = _summarize_transcript_for_caretaker(transcript_data)
+    sent_to: str | None = None
+    if caretaker_email:
+        subject = f"MedMate session summary for {display_name}"
+        body_text = f"Hello {caretaker_name},\n\nHere is a summary of the recent MedMate conversation with {display_name}:\n\n{summary}\n\n— MedMate"
+        _send_email(caretaker_email, subject, body_text)
+        sent_to = caretaker_email
+    return {"summary": summary, "sent_to": sent_to}
+
+
 def _send_dose_notification_email(
     to_email: str, to_name: str, elder_display_name: str, slot: str, taken: bool
 ) -> None:

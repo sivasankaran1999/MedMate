@@ -220,6 +220,9 @@ export default function Home() {
   // Show user speech transcript by default (comes from server-side input transcription).
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [assistantDraft, setAssistantDraft] = useState<string>("");
+  const [sessionSummary, setSessionSummary] = useState<{ summary: string; sentTo: string | null } | null>(null);
+  const [sessionSummaryLoading, setSessionSummaryLoading] = useState(false);
+  const [sessionSummaryError, setSessionSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -536,6 +539,37 @@ export default function Home() {
     session?.disconnect();
     setSession(null);
   }, [session]);
+
+  const handleEndSession = useCallback(() => {
+    disconnect();
+    setSessionSummary(null);
+    setSessionSummaryError(null);
+    if (!elderId || transcript.length === 0) {
+      return;
+    }
+    setSessionSummaryLoading(true);
+    fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/session-summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transcript: transcript.map(({ role, text }) => ({ role, text })),
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error((d as { detail?: string }).detail || "Failed to generate summary");
+        }
+        return res.json();
+      })
+      .then((data: { summary: string; sent_to: string | null }) => {
+        setSessionSummary({ summary: data.summary, sentTo: data.sent_to ?? null });
+      })
+      .catch((err) => {
+        setSessionSummaryError(err instanceof Error ? err.message : "Failed to generate summary");
+      })
+      .finally(() => setSessionSummaryLoading(false));
+  }, [disconnect, elderId, transcript]);
 
   const startMic = useCallback(() => {
     session?.startMic();
@@ -998,6 +1032,9 @@ export default function Home() {
                 title="Live transcript"
                 subtitle="What you said (speech-to-text) and what MedMate decided (Gemini Live TEXT)."
               />
+              <p className="text-xs text-zinc-500">
+                This conversation is being recorded. When you end the session, a summary may be sent to your caretaker.
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -1059,6 +1096,31 @@ export default function Home() {
                 <span className="text-xs text-zinc-500">
                   Interruption demo: start talking while MedMate is speaking — you’ll see “Interrupted”.
                 </span>
+              </div>
+              {/* Session summary placeholder: always visible below live transcript */}
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-2">
+                <h3 className="text-sm font-semibold text-zinc-300">Session summary</h3>
+                {sessionSummaryLoading && (
+                  <p className="text-sm text-zinc-400">Generating summary…</p>
+                )}
+                {sessionSummaryError && (
+                  <p className="text-sm text-red-400">{sessionSummaryError}</p>
+                )}
+                {sessionSummary && !sessionSummaryLoading && (
+                  <>
+                    <p className="text-sm text-zinc-200 whitespace-pre-wrap">{sessionSummary.summary}</p>
+                    <p className="text-xs text-zinc-500">
+                      {sessionSummary.sentTo
+                        ? `Sent to your emergency contact at ${sessionSummary.sentTo}`
+                        : "Summary saved. No emergency contact email set."}
+                    </p>
+                  </>
+                )}
+                {!sessionSummary && !sessionSummaryLoading && !sessionSummaryError && (
+                  <p className="text-sm text-zinc-500">
+                    When you end the session, a summary will appear here and be sent to your emergency contact.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1459,7 +1521,7 @@ export default function Home() {
                   )}
                   <button
                     type="button"
-                    onClick={disconnect}
+                    onClick={handleEndSession}
                     className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
                     aria-label="End session"
                   >
