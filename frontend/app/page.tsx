@@ -39,6 +39,19 @@ function voiceLabel(v: VoiceState): string {
   }
 }
 
+/** Returns refill/checkout page URL for known chains; otherwise Google search for "[name] pharmacy refill". */
+function getRefillCheckoutUrl(pharmacyName: string): string {
+  const n = pharmacyName.toLowerCase();
+  if (n.includes("cvs")) return "https://www.cvs.com/pharmacy/refill";
+  if (n.includes("walgreens")) return "https://www.walgreens.com/pharmacy/refill";
+  if (n.includes("rite aid")) return "https://www.riteaid.com/pharmacy/refill-prescriptions";
+  if (n.includes("walmart")) return "https://www.walmart.com/pharmacy/refill";
+  if (n.includes("kroger")) return "https://www.kroger.com/pharmacy";
+  if (n.includes("target")) return "https://www.target.com/c/pharmacy-refill";
+  if (n.includes("costco")) return "https://www.costco.com/pharmacy.html";
+  return `https://www.google.com/search?q=${encodeURIComponent(pharmacyName + " pharmacy refill")}`;
+}
+
 function StatusPill({
   status,
   voiceState,
@@ -218,6 +231,7 @@ export default function Home() {
   const [nearbyPharmaciesError, setNearbyPharmaciesError] = useState<string | null>(null);
   type PharmacyRow = { name: string; address?: string | null; lat: number; lon: number; distance_km: number; phone?: string | null };
   const [pharmaciesList, setPharmaciesList] = useState<Array<PharmacyRow> | null>(null);
+  const [refillTabletsQuantity, setRefillTabletsQuantity] = useState<string>("");
 
   const [nowTime, setNowTime] = useState<Date>(() => new Date());
   const [interruptionFlag, setInterruptionFlag] = useState(false);
@@ -1372,7 +1386,7 @@ export default function Home() {
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
               <SectionTitle
                 title="Refill: nearby pharmacies"
-                subtitle="You're out of tablets → select the time → find pharmacies → pick from the best options."
+                subtitle="You're out of tablets or running low → select the time → find pharmacies → pick one and go to refill/checkout."
               />
               <p className="text-sm font-medium text-cyan-200/90">
                 You're out of <span className="text-white">{nearbyPharmaciesSlot.charAt(0).toUpperCase() + nearbyPharmaciesSlot.slice(1)}</span> tablets
@@ -1412,10 +1426,25 @@ export default function Home() {
               )}
               {pharmaciesList && pharmaciesList.length > 0 && (
                 <>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Step 3 — 3 best options</p>
+                  <div className="space-y-1">
+                    <label htmlFor="refill-qty" className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                      How many tablets do you need? (optional)
+                    </label>
+                    <input
+                      id="refill-qty"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="e.g. 30"
+                      value={refillTabletsQuantity}
+                      onChange={(e) => setRefillTabletsQuantity(e.target.value)}
+                      className="h-10 w-full max-w-[8rem] rounded-lg bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                    />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Step 3 — Pick a pharmacy, then go to refill/checkout</p>
                   <ul className="space-y-3">
                     {pharmaciesList.slice(0, 3).map((p, i) => {
                       const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.lat},${p.lon}`)}`;
+                      const refillUrl = getRefillCheckoutUrl(p.name);
                       const shareText = `I need to refill my ${nearbyPharmaciesSlot} medications. Nearest option: ${p.name}${p.address ? `, ${p.address}` : ""}. ${mapsUrl}`;
                       const shareWithCaregiver = async () => {
                         if (typeof navigator !== "undefined" && navigator.share) {
@@ -1437,6 +1466,14 @@ export default function Home() {
                           {p.address && <span className="text-xs text-zinc-500">{p.address}</span>}
                           <span className="text-xs text-zinc-400">{p.distance_km} km away</span>
                           <div className="flex flex-wrap gap-2 mt-1">
+                            <a
+                              href={refillUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-500/25 text-amber-200 text-xs font-semibold hover:bg-amber-500/35"
+                            >
+                              Refill / checkout
+                            </a>
                             <a
                               href={mapsUrl}
                               target="_blank"
