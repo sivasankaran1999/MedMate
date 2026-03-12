@@ -297,6 +297,7 @@ export default function Home() {
   const [sessionSummaryLoading, setSessionSummaryLoading] = useState(false);
   const [sessionSummaryError, setSessionSummaryError] = useState<string | null>(null);
   const [endingPhase, setEndingPhase] = useState<"idle" | "ending" | "summarizing">("idle");
+  const [dashboardTab, setDashboardTab] = useState<"session" | "settings">("session");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1133,6 +1134,34 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Tab bar */}
+            <div className="flex rounded-xl border border-white/10 bg-white/[0.03] p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setDashboardTab("session")}
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors duration-200 ${
+                  dashboardTab === "session"
+                    ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]"
+                }`}
+              >
+                Session
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardTab("settings")}
+                className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors duration-200 ${
+                  dashboardTab === "settings"
+                    ? "bg-cyan-500/20 text-cyan-100 border border-cyan-500/30"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]"
+                }`}
+              >
+                My meds & contacts
+              </button>
+            </div>
+
+            {dashboardTab === "session" && (
+              <>
             {/* Now — always-on summary */}
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
               <SectionTitle
@@ -1316,6 +1345,114 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Status */}
+            <div className="flex flex-col gap-3">
+              {error && (
+                <div
+                  className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400 font-medium"
+                  role="alert"
+                >
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col gap-3 pt-2">
+              {!isConnected ? (
+                <button
+                  type="button"
+                  onClick={connect}
+                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                  aria-label="Start session"
+                >
+                  Start session
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={isMicOn ? stopMic : startMic}
+                    className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
+                      isMicOn
+                        ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
+                        : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
+                    }`}
+                    aria-label={isMicOn ? "Stop microphone" : "Start microphone"}
+                    aria-pressed={isMicOn}
+                  >
+                    {isMicOn ? "Stop microphone" : "Start microphone"}
+                  </button>
+                  {cameraStream && (
+                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
+                      <video
+                        ref={cameraVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        aria-label="Camera preview"
+                      />
+                      <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
+                        {liveVideoActive
+                          ? "Live feed on. MedMate will guide you until it can read the pill or label—then it will tell you what it is and if it's the right time."
+                          : "Position pill or bottle. When you start live video, MedMate will guide you (e.g. tilt, move closer) until it can read the imprint or label."}
+                      </p>
+                    </div>
+                  )}
+                  {!liveVideoActive ? (
+                    <button
+                      type="button"
+                      onClick={startLiveVideo}
+                      disabled={cameraOpening}
+                      className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
+                      aria-label="Start live video feed"
+                    >
+                      {cameraOpening ? "Opening camera…" : "Start live video"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopLiveVideo}
+                      className="h-14 w-full rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-semibold text-lg shadow-lg shadow-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                      aria-label="Stop live video feed"
+                    >
+                      Stop live video
+                    </button>
+                  )}
+                  {pendingEndSession && (
+                    <p className="text-sm text-amber-200/90">
+                      Answer MedMate&apos;s questions, then click End session again to leave.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleEndSession}
+                    className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
+                    aria-label="End session"
+                    disabled={endingPhase !== "idle"}
+                  >
+                    {endingPhase === "ending"
+                      ? "Ending session…"
+                      : endingPhase === "summarizing"
+                        ? "Summarizing…"
+                        : pendingEndSession
+                          ? "End session (click again to leave)"
+                          : "End session"}
+                  </button>
+                  {endingPhase !== "idle" && (
+                    <p className="text-xs text-zinc-500 text-center">
+                      {endingPhase === "ending" ? "Closing the session…" : "Generating summary + sending caregiver email…"}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+              </>
+            )}
+
+            {dashboardTab === "settings" && (
+              <>
             {/* My medications — so the agent knows what you take and when */}
             <div className="relative rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
               <SectionTitle
@@ -1654,110 +1791,8 @@ export default function Home() {
                 <p className="text-xs text-zinc-500">No pharmacies found within 5 km. Try a different area or increase radius.</p>
               )}
             </div>
-
-            {/* Status */}
-            <div className="flex flex-col gap-3">
-              {error && (
-                <div
-                  className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400 font-medium"
-                  role="alert"
-                >
-                  {error}
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex flex-col gap-3 pt-2">
-              {!isConnected ? (
-                <button
-                  type="button"
-                  onClick={connect}
-                  className="h-14 w-full rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-semibold text-lg shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:from-cyan-400 hover:to-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                  aria-label="Start session"
-                >
-                  Start session
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={isMicOn ? stopMic : startMic}
-                    className={`h-14 w-full rounded-xl font-semibold text-lg shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 ${
-                      isMicOn
-                        ? "bg-red-500/90 hover:bg-red-500 text-white shadow-red-500/25"
-                        : "bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:from-emerald-400 hover:to-emerald-500"
-                    }`}
-                    aria-label={isMicOn ? "Stop microphone" : "Start microphone"}
-                    aria-pressed={isMicOn}
-                  >
-                    {isMicOn ? "Stop microphone" : "Start microphone"}
-                  </button>
-                  {cameraStream && (
-                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
-                      <video
-                        ref={cameraVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover"
-                        aria-label="Camera preview"
-                      />
-                      <p className="absolute bottom-2 left-2 right-2 text-center text-xs text-white/80 bg-black/60 px-2 py-1 rounded">
-                        {liveVideoActive
-                          ? "Live feed on. MedMate will guide you until it can read the pill or label—then it will tell you what it is and if it's the right time."
-                          : "Position pill or bottle. When you start live video, MedMate will guide you (e.g. tilt, move closer) until it can read the imprint or label."}
-                      </p>
-                    </div>
-                  )}
-                  {!liveVideoActive ? (
-                    <button
-                      type="button"
-                      onClick={startLiveVideo}
-                      disabled={cameraOpening}
-                      className="h-14 w-full rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 hover:from-violet-400 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200 disabled:opacity-70 disabled:cursor-wait"
-                      aria-label="Start live video feed"
-                    >
-                      {cameraOpening ? "Opening camera…" : "Start live video"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={stopLiveVideo}
-                      className="h-14 w-full rounded-xl bg-red-500/90 hover:bg-red-500 text-white font-semibold text-lg shadow-lg shadow-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                      aria-label="Stop live video feed"
-                    >
-                      Stop live video
-                    </button>
-                  )}
-                  {pendingEndSession && (
-                    <p className="text-sm text-amber-200/90">
-                      Answer MedMate&apos;s questions, then click End session again to leave.
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleEndSession}
-                    className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
-                    aria-label="End session"
-                    disabled={endingPhase !== "idle"}
-                  >
-                    {endingPhase === "ending"
-                      ? "Ending session…"
-                      : endingPhase === "summarizing"
-                        ? "Summarizing…"
-                        : pendingEndSession
-                          ? "End session (click again to leave)"
-                          : "End session"}
-                  </button>
-                  {endingPhase !== "idle" && (
-                    <p className="text-xs text-zinc-500 text-center">
-                      {endingPhase === "ending" ? "Closing the session…" : "Generating summary + sending caregiver email…"}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+              </>
+            )}
           </section>
 
           <p className="text-center text-xs text-zinc-600 font-medium">
