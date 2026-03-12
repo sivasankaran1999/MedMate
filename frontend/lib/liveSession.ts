@@ -5,6 +5,9 @@
 
 const SAMPLE_RATE_CAPTURE = 16000;
 const SAMPLE_RATE_PLAYBACK = 24000;
+/** Pre-buffer ~150ms before starting playback to avoid distorted first few words from the first chunk. */
+const MIN_PLAYBACK_BUFFER_MS = 150;
+const MIN_PLAYBACK_BUFFER_SAMPLES = Math.round((SAMPLE_RATE_PLAYBACK * MIN_PLAYBACK_BUFFER_MS) / 1000);
 
 function float32ToPCM16(float32: Float32Array): ArrayBuffer {
   const int16 = new Int16Array(float32.length);
@@ -79,6 +82,11 @@ export class LiveSession {
   private mediaStream: MediaStream | null = null;
   private isCapturing = false;
   private playbackContext: AudioContext | null = null;
+  /** Pre-buffer the first chunk(s) to avoid distorted start; flush when we have enough. */
+  private playbackBuffer: Float32Array[] = [];
+  private playbackBufferSamples = 0;
+  private playbackFlushed = false;
+  private inModelTurn = false;
   private callbacks: LiveSessionCallbacks;
   private backendUrl: string;
   private elderId: string;
@@ -249,6 +257,10 @@ export class LiveSession {
         if (outText) this.callbacks.onAssistantText?.(outText);
 
         if (sc.interrupted) {
+          this.playbackBuffer = [];
+          this.playbackBufferSamples = 0;
+          this.playbackFlushed = false;
+          this.inModelTurn = false;
           this.playbackNode?.port.postMessage("interrupt");
           this.callbacks.onVoiceState?.("idle");
           this.callbacks.onInterrupted?.();
@@ -256,7 +268,12 @@ export class LiveSession {
         const modelTurn = sc.modelTurn ?? sc.model_turn;
         const parts = modelTurn?.parts;
         if (parts?.length) {
-          // New model output has started → allow a future turnComplete.
+          if (!this.inModelTurn) {
+            this.inModelTurn = true;
+            this.playbackBuffer = [];
+            this.playbackBufferSamples = 0;
+            this.playbackFlushed = false;
+          }
           this.turnCompleteFired = false;
           this.callbacks.onVoiceState?.("speaking");
           for (const part of parts) {
@@ -266,6 +283,8 @@ export class LiveSession {
           }
         }
         if (sc.turnComplete ?? sc.turn_complete) {
+          this.inModelTurn = false;
+          this.flushPlaybackBuffer();
           this.callbacks.onVoiceState?.("idle");
           if (!this.turnCompleteFired) {
             this.turnCompleteFired = true;
@@ -284,22 +303,47 @@ export class LiveSession {
     }
   }
 
+  /** Send any buffered audio to the worklet so short responses still play. */
+  private flushPlaybackBuffer(): void {
+    if (!this.playbackNode || this.playbackBuffer.length === 0) return;
+    for (const buf of this.playbackBuffer) this.playbackNode.port.postMessage(buf);
+    this.playbackBuffer = [];
+    this.playbackBufferSamples = 0;
+    this.playbackFlushed = true;
+  }
+
   private playAudioChunk(data: string | number[] | Uint8Array): void {
     if (typeof window === "undefined") return;
+    let float32: Float32Array;
+    if (typeof data === "string") {
+      float32 = base64ToFloat32(data);
+    } else if (Array.isArray(data)) {
+      float32 = pcmBytesToFloat32LE(new Uint8Array(data));
+    } else if (data instanceof Uint8Array) {
+      float32 = pcmBytesToFloat32LE(data);
+    } else {
+      return;
+    }
+    if (float32.length === 0) return;
+
     this.initPlayback().then(() => {
       if (!this.playbackNode) return;
-      let float32: Float32Array;
-      if (typeof data === "string") {
-        float32 = base64ToFloat32(data);
-      } else if (Array.isArray(data)) {
-        float32 = pcmBytesToFloat32LE(new Uint8Array(data));
-      } else if (data instanceof Uint8Array) {
-        float32 = pcmBytesToFloat32LE(data);
-      } else {
+      // Resume context in case it was suspended (avoids distorted first playback on some browsers)
+      if (this.playbackContext?.state === "suspended") {
+        this.playbackContext.resume();
+      }
+      if (this.playbackFlushed) {
+        this.playbackNode.port.postMessage(float32);
         return;
       }
-      if (float32.length === 0) return;
-      this.playbackNode.port.postMessage(float32);
+      this.playbackBuffer.push(float32);
+      this.playbackBufferSamples += float32.length;
+      if (this.playbackBufferSamples >= MIN_PLAYBACK_BUFFER_SAMPLES) {
+        for (const buf of this.playbackBuffer) this.playbackNode.port.postMessage(buf);
+        this.playbackBuffer = [];
+        this.playbackBufferSamples = 0;
+        this.playbackFlushed = true;
+      }
     });
   }
 
@@ -565,6 +609,10 @@ export class LiveSession {
     this.playbackNode = null;
     this.playbackContext = null;
     this.gainNode = null;
+    this.playbackBuffer = [];
+    this.playbackBufferSamples = 0;
+    this.playbackFlushed = false;
+    this.inModelTurn = false;
     this.callbacks.onStatus?.("disconnected");
     this.callbacks.onVoiceState?.("idle");
   }
