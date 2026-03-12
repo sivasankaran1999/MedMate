@@ -372,6 +372,8 @@ class CaregiverPharmacyOption(BaseModel):
     name: str
     address: str | None = None
     distance_km: float | None = None
+    maps_url: str | None = None
+    # Backward compatibility (older client versions sent refill/checkout URL)
     url: str | None = None
 
 
@@ -545,8 +547,15 @@ def session_summary(elder_id: str, body: SessionSummaryPayload):
                     line += f" ({p.distance_km:.2f} km)"
                 if p.address:
                     line += f" — {p.address}"
-                if p.url:
-                    line += f"\n   Refill/checkout: {p.url}"
+                maps_url = (p.maps_url or "").strip()
+                if not maps_url:
+                    # Always provide a Maps link even if client didn't send one.
+                    # Prefer name+address query so caretakers can open it directly.
+                    q = " ".join([s for s in [(p.name or "").strip(), (p.address or "").strip()] if s]).strip()
+                    if q:
+                        maps_url = "https://www.google.com/maps/search/?api=1&query=" + quote(q)
+                if maps_url:
+                    line += f"\n   Open in Maps: {maps_url}"
                 refill_block += line
 
     sent_to: str | None = None

@@ -256,7 +256,7 @@ export default function Home() {
   const [refillForCaregiver, setRefillForCaregiver] = useState<{
     slot: "morning" | "afternoon" | "night";
     reason: string;
-    top_pharmacies: Array<{ name: string; address?: string | null; distance_km?: number | null; url?: string | null }>;
+    top_pharmacies: Array<{ name: string; address?: string | null; distance_km?: number | null; maps_url?: string | null }>;
   } | null>(null);
   const refillPromptedRef = useRef(false);
 
@@ -270,6 +270,7 @@ export default function Home() {
   const [sessionSummary, setSessionSummary] = useState<{ summary: string; sentTo: string | null } | null>(null);
   const [sessionSummaryLoading, setSessionSummaryLoading] = useState(false);
   const [sessionSummaryError, setSessionSummaryError] = useState<string | null>(null);
+  const [endingPhase, setEndingPhase] = useState<"idle" | "ending" | "summarizing">("idle");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -596,7 +597,7 @@ export default function Home() {
                 name: p.name,
                 address: p.address ?? null,
                 distance_km: typeof p.distance_km === "number" ? p.distance_km : null,
-                url: getRefillCheckoutUrl(p.name),
+                maps_url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.lat},${p.lon}`)}`,
               }));
               setRefillForCaregiver({ slot, reason: text, top_pharmacies: top });
               // Also populate the UI list so user sees suggestions immediately.
@@ -657,11 +658,16 @@ export default function Home() {
     setSessionSummary(null);
     setSessionSummaryError(null);
     if (!elderId || transcript.length === 0) {
+      setEndingPhase("ending");
       disconnect();
+      // Keep the UI feedback visible briefly (otherwise it can render too fast to notice).
+      window.setTimeout(() => setEndingPhase("idle"), 800);
       return;
     }
+    setEndingPhase("ending");
     setSessionSummaryLoading(true);
     disconnect();
+    setEndingPhase("summarizing");
     fetch(`${httpBase}/elders/${encodeURIComponent(elderId)}/session-summary`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -683,7 +689,11 @@ export default function Home() {
       .catch((err) => {
         setSessionSummaryError(err instanceof Error ? err.message : "Failed to generate summary");
       })
-      .finally(() => setSessionSummaryLoading(false));
+      .finally(() => {
+        setSessionSummaryLoading(false);
+        // Keep the UI feedback visible briefly (otherwise it can flicker).
+        window.setTimeout(() => setEndingPhase("idle"), 800);
+      });
   }, [disconnect, elderId, transcript, refillForCaregiver]);
 
   const handleEndSession = useCallback(() => {
@@ -1681,9 +1691,21 @@ export default function Home() {
                     onClick={handleEndSession}
                     className="h-14 w-full rounded-xl border border-white/20 bg-white/5 text-zinc-300 font-semibold text-lg hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 focus:ring-offset-[#0a0a0f] active:scale-[0.98] transition-all duration-200"
                     aria-label="End session"
+                    disabled={endingPhase !== "idle"}
                   >
-                    {pendingEndSession ? "End session (click again to leave)" : "End session"}
+                    {endingPhase === "ending"
+                      ? "Ending session…"
+                      : endingPhase === "summarizing"
+                        ? "Summarizing…"
+                        : pendingEndSession
+                          ? "End session (click again to leave)"
+                          : "End session"}
                   </button>
+                  {endingPhase !== "idle" && (
+                    <p className="text-xs text-zinc-500 text-center">
+                      {endingPhase === "ending" ? "Closing the session…" : "Generating summary + sending caregiver email…"}
+                    </p>
+                  )}
                 </>
               )}
             </div>

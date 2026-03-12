@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "ulimit -n 10240 2>/dev/null; next dev --hostname 127.0.0.1 --port 3000",
-    "dev:turbo": "next dev --turbo",
+    "dev": "ulimit -n 10240 2>/dev/null; WATCHPACK_POLLING=true WATCHPACK_POLLING_INTERVAL=1000 next dev --hostname 127.0.0.1 --port 3000",
+    "dev:turbo": "WATCHPACK_POLLING=true WATCHPACK_POLLING_INTERVAL=1000 next dev --turbo --hostname 127.0.0.1 --port 3000",
     "build": "next build",
     "start": "next dev",
     "start:prod": "next start",
