@@ -73,6 +73,26 @@ function getRefillCheckoutUrl(pharmacyName: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(pharmacyName + " pharmacy refill")}`;
 }
 
+/** Eye icon for "show password" state. */
+function EyeIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+/** Eye-off icon for "hide password" state. */
+function EyeOffIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
 function StatusPill({
   status,
   voiceState,
@@ -128,7 +148,11 @@ function SectionTitle({
           <p className="mt-1 text-xs text-zinc-500 leading-relaxed">{subtitle}</p>
         ) : null}
       </div>
-      <div className="shrink-0 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-zinc-400">
+      <div className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-medium text-zinc-400">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
         Secure
       </div>
     </div>
@@ -212,9 +236,11 @@ export default function Home() {
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginLoading, setLoginLoading] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [registerDisplayName, setRegisterDisplayName] = useState("");
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registerLoading, setRegisterLoading] = useState(false);
@@ -829,7 +855,7 @@ export default function Home() {
                     onChange={(e) => setLoginEmail(e.target.value)}
                     required
                     autoComplete="email"
-                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -843,7 +869,7 @@ export default function Home() {
                     value={registerDisplayName}
                     onChange={(e) => setRegisterDisplayName(e.target.value)}
                     autoComplete="name"
-                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     placeholder="Your name"
                   />
                 </div>
@@ -851,17 +877,27 @@ export default function Home() {
                   <label htmlFor="reg-password" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
                     Password
                   </label>
-                  <input
-                    id="reg-password"
-                    type="password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    required
-                    minLength={6}
-                    autoComplete="new-password"
-                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
-                    placeholder="••••••••"
-                  />
+                  <div className="relative">
+                    <input
+                      id="reg-password"
+                      type={showRegisterPassword ? "text" : "password"}
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      className="w-full h-12 pl-4 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowRegisterPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-zinc-400 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200"
+                      aria-label={showRegisterPassword ? "Hide password" : "Show password"}
+                    >
+                      {showRegisterPassword ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -872,14 +908,14 @@ export default function Home() {
                     value={registerEmergencyName}
                     onChange={(e) => setRegisterEmergencyName(e.target.value)}
                     placeholder="Name (e.g. son/daughter)"
-                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                   />
                   <input
                     type="email"
                     value={registerEmergencyEmail}
                     onChange={(e) => setRegisterEmergencyEmail(e.target.value)}
                     placeholder="Their email"
-                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                   />
                 </div>
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
@@ -891,21 +927,21 @@ export default function Home() {
                     value={registerPharmacistName}
                     onChange={(e) => setRegisterPharmacistName(e.target.value)}
                     placeholder="Name or pharmacy"
-                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                   />
                   <input
                     type="email"
                     value={registerPharmacistEmail}
                     onChange={(e) => setRegisterPharmacistEmail(e.target.value)}
                     placeholder="Email"
-                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                   />
                   <input
                     type="tel"
                     value={registerPharmacistPhone}
                     onChange={(e) => setRegisterPharmacistPhone(e.target.value)}
                     placeholder="Phone"
-                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    className="w-full h-11 px-4 rounded-lg bg-white/5 border border-white/10 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                   />
                 </div>
                 <div className="space-y-2">
@@ -924,7 +960,7 @@ export default function Home() {
                             [slot]: { ...tw[slot], start: e.target.value },
                           }))
                         }
-                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                       />
                       <span className="text-zinc-500">to</span>
                       <input
@@ -936,7 +972,7 @@ export default function Home() {
                             [slot]: { ...tw[slot], end: e.target.value },
                           }))
                         }
-                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                        className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                       />
                     </div>
                   ))}
@@ -980,7 +1016,7 @@ export default function Home() {
                     onChange={(e) => setLoginEmail(e.target.value)}
                     required
                     autoComplete="email"
-                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
+                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -988,16 +1024,26 @@ export default function Home() {
                   <label htmlFor="login-password" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
                     Password
                   </label>
-                  <input
-                    id="login-password"
-                    type="password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    required
-                    autoComplete="current-password"
-                    className="w-full h-12 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50"
-                    placeholder="••••••••"
-                  />
+                  <div className="relative">
+                    <input
+                      id="login-password"
+                      type={showLoginPassword ? "text" : "password"}
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      required
+                      autoComplete="current-password"
+                      className="w-full h-12 pl-4 pr-12 rounded-xl bg-white/5 border border-white/10 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-zinc-400 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200"
+                      aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                    >
+                      {showLoginPassword ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
                 </div>
                 {loginError && (
                   <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
@@ -1039,7 +1085,7 @@ export default function Home() {
       <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(10,10,15,0.35)_0%,rgba(10,10,15,0.85)_70%)]" />
 
       <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 sm:p-10">
-        <div className="w-full max-w-3xl flex flex-col gap-8">
+        <div className="w-full max-w-5xl flex flex-col gap-8">
           {/* Header */}
           <header className="text-center space-y-4">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs text-zinc-400 backdrop-blur">
@@ -1080,7 +1126,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-zinc-300 hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-zinc-300 hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200"
                 >
                   Sign out
                 </button>
@@ -1185,7 +1231,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setCaptionsEnabled((v) => !v)}
-                  className={`h-9 px-4 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 ${
+                  className={`h-9 px-4 rounded-xl border text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200 ${
                     captionsEnabled
                       ? "border-cyan-500/30 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/20"
                       : "border-white/10 bg-white/[0.03] text-zinc-300 hover:bg-white/[0.06]"
@@ -1197,11 +1243,11 @@ export default function Home() {
                   If MedMate stops responding, turn captions OFF (some browsers can’t share the mic).
                 </span>
               </div>
-              <div className="max-h-72 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-3 space-y-2">
+              <div className={`max-h-72 overflow-y-auto rounded-xl border p-3 space-y-2 ${transcript.length === 0 && !assistantDraft ? "border-dashed border-white/15 bg-black/10" : "border-white/10 bg-black/20"}`}>
                 {transcript.length === 0 && !assistantDraft ? (
                   <p className="text-sm text-zinc-500">
-                    Start the microphone to see MedMate&apos;s transcript here.
-                    {captionsEnabled ? " (Your speech captions will also appear when available.)" : ""}
+                    Transcript will appear here when you start the microphone.
+                    {captionsEnabled ? " Your speech captions will also appear when available." : ""}
                   </p>
                 ) : (
                   <>
@@ -1235,7 +1281,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setTranscript([])}
-                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-zinc-300 hover:bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+                  className="h-9 px-4 rounded-xl border border-white/10 bg-white/[0.03] text-sm text-zinc-300 hover:bg-white/[0.06] focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200"
                 >
                   Clear transcript
                 </button>
@@ -1263,7 +1309,7 @@ export default function Home() {
                   </>
                 )}
                 {!sessionSummary && !sessionSummaryLoading && !sessionSummaryError && (
-                  <p className="text-sm text-zinc-500">
+                  <p className="text-sm text-zinc-500 leading-relaxed">
                     When you end the session, a summary will appear here and be sent to your emergency contact.
                   </p>
                 )}
@@ -1293,14 +1339,14 @@ export default function Home() {
                           type="time"
                           value={(schedule.timeWindows || DEFAULT_TIME_WINDOWS)[slot]?.start ?? "10:00"}
                           onChange={(e) => updateTimeWindow(slot, "start", e.target.value)}
-                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                         />
                         <span className="text-zinc-500">to</span>
                         <input
                           type="time"
                           value={(schedule.timeWindows || DEFAULT_TIME_WINDOWS)[slot]?.end ?? "12:00"}
                           onChange={(e) => updateTimeWindow(slot, "end", e.target.value)}
-                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                          className="h-9 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                         />
                       </div>
                     ))}
@@ -1312,7 +1358,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => addMed(slot)}
-                          className="h-8 px-3 rounded-lg border border-cyan-500/20 bg-cyan-500/10 text-xs text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/40"
+                          className="h-8 px-3 rounded-lg border border-white/10 bg-white/[0.03] text-xs text-zinc-300 hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-colors duration-200"
                         >
                           + Add
                         </button>
@@ -1325,14 +1371,14 @@ export default function Home() {
                               value={med.name}
                               onChange={(e) => updateMed(slot, i, "name", e.target.value)}
                               placeholder="Medication name"
-                              className="flex-1 min-w-[140px] h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                              className="flex-1 min-w-[140px] h-10 px-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                             />
                             <input
                               type="text"
                               value={med.strength ?? ""}
                               onChange={(e) => updateMed(slot, i, "strength", e.target.value)}
                               placeholder="e.g. 10 mg"
-                              className="w-24 h-10 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                              className="w-24 h-10 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                             />
                             <label className="flex items-center gap-1 text-xs text-zinc-400">
                               Qty
@@ -1341,13 +1387,13 @@ export default function Home() {
                                 min={1}
                                 value={med.quantity ?? 1}
                                 onChange={(e) => updateMed(slot, i, "quantity", e.target.value)}
-                                className="w-14 h-10 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                                className="w-14 h-10 px-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                               />
                             </label>
                             <button
                               type="button"
                               onClick={() => removeMed(slot, i)}
-                              className="ml-auto h-10 w-10 inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                              className="ml-auto h-10 w-10 inline-flex items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 hover:bg-red-500/10 hover:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-500/40 transition-colors duration-200"
                               aria-label="Remove"
                             >
                               ×
@@ -1389,14 +1435,14 @@ export default function Home() {
                       value={emergencyName}
                       onChange={(e) => setEmergencyName(e.target.value)}
                       placeholder="Name"
-                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                     <input
                       type="email"
                       value={emergencyEmail}
                       onChange={(e) => setEmergencyEmail(e.target.value)}
                       placeholder="Email (we’ll email them if a dose isn’t taken)"
-                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                   </div>
                   <div className="space-y-2">
@@ -1406,21 +1452,21 @@ export default function Home() {
                       value={pharmacistName}
                       onChange={(e) => setPharmacistName(e.target.value)}
                       placeholder="Name or pharmacy"
-                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                     <input
                       type="email"
                       value={pharmacistEmail}
                       onChange={(e) => setPharmacistEmail(e.target.value)}
                       placeholder="Email"
-                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                     <input
                       type="tel"
                       value={pharmacistPhone}
                       onChange={(e) => setPharmacistPhone(e.target.value)}
                       placeholder="Phone"
-                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="w-full h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                   </div>
                   <div className="flex items-center gap-2 pt-1">
@@ -1451,7 +1497,7 @@ export default function Home() {
                     setConfirmDoseSlot(e.target.value as "morning" | "afternoon" | "night");
                     setConfirmDoseMessage(null);
                   }}
-                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                 >
                   {SLOTS.map((s) => (
                     <option key={s} value={s} className="bg-[#0a0a0f] text-white">
@@ -1495,7 +1541,7 @@ export default function Home() {
                 <select
                   value={nearbyPharmaciesSlot}
                   onChange={(e) => setNearbyPharmaciesSlot(e.target.value as "morning" | "afternoon" | "night")}
-                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                  className="h-11 px-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                 >
                   {SLOTS.map((s) => (
                     <option key={s} value={s} className="bg-[#0a0a0f] text-white">
@@ -1508,7 +1554,7 @@ export default function Home() {
                   type="button"
                   onClick={findNearbyPharmacies}
                   disabled={nearbyPharmaciesLoading}
-                  className="h-11 px-5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-violet-500/15 text-cyan-200 font-semibold text-sm hover:from-cyan-500/25 hover:to-violet-500/20 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-70 disabled:cursor-wait"
+                  className="h-11 px-5 rounded-xl border border-white/10 bg-white/[0.03] text-zinc-300 font-semibold text-sm hover:bg-white/[0.06] hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/40 disabled:opacity-70 disabled:cursor-wait transition-colors duration-200"
                 >
                   {nearbyPharmaciesLoading ? "Finding…" : "Find pharmacies near me"}
                 </button>
@@ -1536,7 +1582,7 @@ export default function Home() {
                       placeholder="e.g. 30"
                       value={refillTabletsQuantity}
                       onChange={(e) => setRefillTabletsQuantity(e.target.value)}
-                      className="h-10 w-full max-w-[8rem] rounded-lg bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40"
+                      className="h-10 w-full max-w-[8rem] rounded-lg bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-shadow duration-150"
                     />
                   </div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Step 3 — Pick a pharmacy, then go to refill/checkout</p>
