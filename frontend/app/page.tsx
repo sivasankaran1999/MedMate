@@ -1098,11 +1098,6 @@ export default function Home() {
                   <span className="text-zinc-500">Time</span>
                   <span className="font-semibold">{formatNow12h(nowTime)}</span>
                 </span>
-                {interruptionFlag && (
-                  <span className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                    Listening (interrupted)
-                  </span>
-                )}
               </div>
               {schedule ? (() => {
                 const tw = schedule.timeWindows || DEFAULT_TIME_WINDOWS;
@@ -1177,6 +1172,12 @@ export default function Home() {
                 title="Live transcript"
                 subtitle="What you said (speech-to-text) and what MedMate decided (Gemini Live TEXT)."
               />
+              {interruptionFlag && (
+                <div className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/40 bg-amber-500/15 px-3 py-2 text-xs sm:text-sm text-amber-100 shadow-sm shadow-amber-500/30">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse-soft" />
+                  <span>You interrupted MedMate – it&apos;s listening to you now.</span>
+                </div>
+              )}
               <p className="text-xs text-zinc-500">
                 This conversation is being recorded. When you end the session, a summary may be sent to your caretaker.
               </p>
