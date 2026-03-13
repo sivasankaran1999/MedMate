@@ -131,6 +131,32 @@ function StatusPill({
   );
 }
 
+/** Round glowing orb — orange when user speaking, blue when agent speaking; blinks the whole time. */
+function VoiceOrb({ state }: { state: VoiceState }) {
+  const isListening = state === "listening";
+  const isSpeaking = state === "speaking";
+  const isActive = isListening || isSpeaking;
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div
+        className={`relative h-16 w-16 sm:h-20 sm:w-20 rounded-full transition-colors duration-300 ${
+          isListening
+            ? "bg-orange-400/90 text-orange-300 shadow-lg shadow-orange-500/40 ring-4 ring-orange-400/40 animate-voice-glow"
+            : isSpeaking
+              ? "bg-cyan-400/90 text-cyan-300 shadow-lg shadow-cyan-500/40 ring-4 ring-cyan-400/40 animate-voice-glow"
+              : "bg-white/10 text-zinc-400 ring-2 ring-white/20"
+        }`}
+        aria-hidden
+      />
+      {isActive && (
+        <span className="text-xs font-medium text-zinc-400">
+          {isListening ? "You're speaking…" : "MedMate is speaking…"}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function SectionTitle({
   title,
   subtitle,
@@ -1200,6 +1226,11 @@ export default function Home() {
 
             {dashboardTab === "session" && (
               <>
+            {isConnected && (
+              <div className="flex justify-center py-2">
+                <VoiceOrb state={voiceState} />
+              </div>
+            )}
             {/* Now — always-on summary */}
             <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-3">
               <SectionTitle

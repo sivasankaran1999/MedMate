@@ -94,6 +94,10 @@ export class LiveSession {
   private errorShownFromMessage = false;
   /** Guard against duplicate turnComplete events. */
   private turnCompleteFired = false;
+  /** Keep "speaking" (orb visible) until playback can finish; server sends turnComplete when it finishes generating, not when client finishes playing. */
+  private idleAfterTurnCompleteTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Total samples received this agent turn (for estimating playback duration so orb stays blue until done). */
+  private turnPlaybackSamplesTotal = 0;
   /** Live video feed: interval and stream so we can stop. */
   private liveVideoIntervalId: ReturnType<typeof setInterval> | null = null;
   private liveVideoStream: MediaStream | null = null;
@@ -257,6 +261,10 @@ export class LiveSession {
         if (outText) this.callbacks.onAssistantText?.(outText);
 
         if (sc.interrupted) {
+          if (this.idleAfterTurnCompleteTimer != null) {
+            clearTimeout(this.idleAfterTurnCompleteTimer);
+            this.idleAfterTurnCompleteTimer = null;
+          }
           this.playbackBuffer = [];
           this.playbackBufferSamples = 0;
           this.playbackFlushed = false;
@@ -268,8 +276,13 @@ export class LiveSession {
         const modelTurn = sc.modelTurn ?? sc.model_turn;
         const parts = modelTurn?.parts;
         if (parts?.length) {
+          if (this.idleAfterTurnCompleteTimer != null) {
+            clearTimeout(this.idleAfterTurnCompleteTimer);
+            this.idleAfterTurnCompleteTimer = null;
+          }
           if (!this.inModelTurn) {
             this.inModelTurn = true;
+            this.turnPlaybackSamplesTotal = 0;
             this.playbackBuffer = [];
             this.playbackBufferSamples = 0;
             this.playbackFlushed = false;
@@ -285,7 +298,16 @@ export class LiveSession {
         if (sc.turnComplete ?? sc.turn_complete) {
           this.inModelTurn = false;
           this.flushPlaybackBuffer();
-          this.callbacks.onVoiceState?.("idle");
+          if (this.idleAfterTurnCompleteTimer != null) {
+            clearTimeout(this.idleAfterTurnCompleteTimer);
+            this.idleAfterTurnCompleteTimer = null;
+          }
+          const durationMs = Math.round((this.turnPlaybackSamplesTotal / SAMPLE_RATE_PLAYBACK) * 1000);
+          const PLAYBACK_GRACE_MS = Math.min(25000, Math.max(2000, durationMs));
+          this.idleAfterTurnCompleteTimer = setTimeout(() => {
+            this.idleAfterTurnCompleteTimer = null;
+            this.callbacks.onVoiceState?.(this.isCapturing ? "listening" : "idle");
+          }, PLAYBACK_GRACE_MS);
           if (!this.turnCompleteFired) {
             this.turnCompleteFired = true;
             this.callbacks.onTurnComplete?.();
@@ -337,6 +359,7 @@ export class LiveSession {
       return;
     }
     if (float32.length === 0) return;
+    this.turnPlaybackSamplesTotal += float32.length;
 
     this.initPlayback().then(() => {
       if (!this.playbackNode) return;
@@ -644,6 +667,10 @@ export class LiveSession {
   }
 
   disconnect(): void {
+    if (this.idleAfterTurnCompleteTimer != null) {
+      clearTimeout(this.idleAfterTurnCompleteTimer);
+      this.idleAfterTurnCompleteTimer = null;
+    }
     this.stopMic();
     this.stopLiveVideoFeed();
     this.ws?.close();
