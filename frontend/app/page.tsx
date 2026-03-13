@@ -849,13 +849,33 @@ export default function Home() {
         <div className="absolute inset-0 bg-[#0a0a0f]" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(34,211,238,0.15),transparent)]" />
         <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 sm:p-8">
-          <div className="w-full max-w-md flex flex-col gap-8">
-            <header className="text-center space-y-2">
-              <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-white to-zinc-300 bg-clip-text text-transparent">
+          <div className="w-full max-w-xl flex flex-col gap-8">
+            <header className="text-center space-y-5">
+              <h1 className="text-4xl sm:text-5xl font-bold tracking-tight bg-gradient-to-r from-cyan-300 via-white to-emerald-300 bg-clip-text text-transparent">
                 MedMate
               </h1>
-              <p className="text-zinc-500 text-sm">
-                {showSignUp ? "Create an account to get started." : "Sign in to access your medication schedule."}
+              <p className="text-zinc-200 text-sm sm:text-base leading-relaxed max-w-xl mx-auto">
+                A voice and vision medication companion that <span className="font-semibold text-cyan-200">safely decides what to take now</span>,
+                keeps older adults on‑time, and <span className="font-semibold text-emerald-200">emails every session to their caregiver</span>.
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 text-[11px] sm:text-xs">
+                <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/40 text-cyan-100 font-medium">
+                  Knows your exact schedule
+                </span>
+                <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/40 text-emerald-100 font-medium">
+                  Talks like a patient nurse
+                </span>
+                <span className="px-3 py-1 rounded-full bg-amber-500/10 border border-amber-400/40 text-amber-100 font-medium">
+                  Every chat → summary email to caretaker
+                </span>
+                <span className="px-3 py-1 rounded-full bg-violet-500/10 border border-violet-400/40 text-violet-100 font-medium">
+                  Out of tablets? Finds nearest pharmacy → sends to caretaker
+                </span>
+              </div>
+              <p className="text-zinc-500 text-xs sm:text-sm">
+                {showSignUp
+                  ? "Create an account for your loved one in under a minute."
+                  : "Sign in to see your personal schedule and talk to MedMate."}
               </p>
             </header>
             {showSignUp ? (
@@ -1357,7 +1377,7 @@ export default function Home() {
                 )}
                 {!sessionSummary && !sessionSummaryLoading && !sessionSummaryError && (
                   <p className="text-sm text-zinc-500 leading-relaxed">
-                    When you end the session, a summary will appear here and be sent to your emergency contact.
+                    When you end the session, we’ll generate a short summary and email it to your emergency contact. If you mentioned running out of tablets, we’ll include nearby pharmacy options in that email too.
                   </p>
                 )}
               </div>
