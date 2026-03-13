@@ -396,7 +396,7 @@ export default function Home() {
     setLoginError(null);
     setLoginLoading(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(`${httpBase}/auth/login`, {
         method: "POST",
