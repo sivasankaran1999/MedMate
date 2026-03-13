@@ -226,6 +226,7 @@ export default function Home() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [liveVideoActive, setLiveVideoActive] = useState(false);
   const [session, setSession] = useState<LiveSession | null>(null);
+  const sessionRef = useRef<LiveSession | null>(null);
   /** When true, user has already requested end once; next End click will actually disconnect. */
   const [pendingEndSession, setPendingEndSession] = useState(false);
   /** When true, agent has already asked mandatory questions and user answered; one End click ends directly. */
@@ -293,6 +294,8 @@ export default function Home() {
   // Show user speech transcript by default (comes from server-side input transcription).
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
   const [assistantDraft, setAssistantDraft] = useState<string>("");
+  const assistantDraftRef = useRef<string>("");
+  const lastAssistantQuestionRef = useRef<string | null>(null);
   const [sessionSummary, setSessionSummary] = useState<{ summary: string; sentTo: string | null } | null>(null);
   const [sessionSummaryLoading, setSessionSummaryLoading] = useState(false);
   const [sessionSummaryError, setSessionSummaryError] = useState<string | null>(null);
@@ -308,6 +311,10 @@ export default function Home() {
       setDisplayName(name || "User");
     }
   }, []);
+
+  useEffect(() => {
+    assistantDraftRef.current = assistantDraft;
+  }, [assistantDraft]);
 
   useEffect(() => {
     if (!elderId) return;
@@ -584,7 +591,6 @@ export default function Home() {
         const next = text.trim();
         if (!next) return prev;
         if (!prev) return next;
-        // If we receive the full transcript repeatedly, prefer the longer one.
         if (next.startsWith(prev)) return next;
         if (prev.startsWith(next)) return prev;
         // Otherwise treat as a delta chunk.
@@ -648,6 +654,13 @@ export default function Home() {
     onInterrupted: () => {
       setInterruptionFlag(true);
       setTranscript((t) => [...t, { role: "system", text: "Interrupted — MedMate paused to listen.", ts: Date.now() }]);
+      // Ask the model to always use a standard interruption response.
+      if (sessionRef.current) {
+        sessionRef.current.sendUserText(
+          'You were just interrupted by background noise or the user speaking over you. Out loud, say a short sentence like: "Sorry, I heard some noise and got interrupted. Could you please repeat your question?" Then stop and wait quietly for their next question.',
+          true
+        );
+      }
       setTimeout(() => setInterruptionFlag(false), 2000);
     },
     onTurnComplete: () => {
@@ -673,12 +686,14 @@ export default function Home() {
     setError(null);
     const s = new LiveSession(BACKEND_URL, elderId, callbacks);
     setSession(s);
+    sessionRef.current = s;
     s.connect().catch(() => {});
   }, [elderId]);
 
   const disconnect = useCallback(() => {
     session?.disconnect();
     setSession(null);
+    sessionRef.current = null;
     setPendingEndSession(false);
     setMandatoryQuestionsAnswered(false);
     setIsMicOn(false);
