@@ -87,6 +87,16 @@ def ready():
     return health()
 
 
+@app.get("/auth/status")
+def auth_status():
+    """Lightweight status for the frontend: backend is up and project is set. Does not touch Firestore."""
+    return {
+        "ok": True,
+        "backend": "up",
+        "project_set": bool(GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_PROJECT.strip()),
+    }
+
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Approximate distance in km between two WGS84 points."""
     R = 6371
@@ -260,9 +270,12 @@ def login(body: LoginPayload):
         raise
     except Exception as e:
         logging.getLogger("uvicorn.error").exception("Login failed (Firestore/credentials)")
+        msg = str(e).strip() or "Database error"
+        if len(msg) > 200:
+            msg = msg[:197] + "..."
         raise HTTPException(
             status_code=503,
-            detail="Database unavailable. Run 'gcloud auth application-default login' in this terminal, then restart the backend. See backend/LOCAL-DEV.md.",
+            detail=f"Database unavailable: {msg}. Run 'gcloud auth application-default login' and restart the backend. See backend/LOCAL-DEV.md.",
         ) from e
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -419,8 +432,21 @@ def _send_email(to_email: str, subject: str, body_text: str) -> None:
         logging.getLogger("uvicorn.error").warning("Failed to send email: %s", e)
 
 
+class VertexSummaryError(Exception):
+    """Raised when Vertex AI summarization fails. No fallback; caller should return 503."""
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 def _summarize_transcript_for_caretaker(transcript: list[dict[str, str]]) -> str:
-    """Call Vertex AI Gemini to summarize the conversation for a caretaker. Returns summary text."""
+    """
+    Summarize the conversation using Vertex AI only. No fallback.
+    Raises VertexSummaryError if project is unset or all Vertex attempts fail.
+    """
+    from urllib.error import HTTPError
+
     lines = []
     for entry in transcript:
         role = (entry.get("role") or "user").lower()
@@ -436,11 +462,11 @@ def _summarize_transcript_for_caretaker(transcript: list[dict[str, str]]) -> str
     conversation = "\n".join(lines) if lines else "No conversation."
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1").strip()
-    _fallback = "Session ended. A brief summary could not be generated for this session."
     _log = __import__("logging").getLogger("uvicorn.error")
+
     if not project:
-        _log.warning("Session summary: GOOGLE_CLOUD_PROJECT not set")
-        return _fallback
+        raise VertexSummaryError("GOOGLE_CLOUD_PROJECT is not set. Set it in backend/.env.")
+
     prompt = f"""Summarize this conversation between an elderly user and a medication assistant (MedMate) for a family caretaker. Be concise. Include:
 - What was discussed (medications, doses, timing)
 - Whether any doses were taken or missed
@@ -450,30 +476,50 @@ Keep the summary to a short paragraph.
 Conversation:
 {conversation}"""
 
-    # Try Google GenAI SDK (Vertex AI) first
+    def _extract_text(response: Any) -> str | None:
+        if response is None:
+            return None
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        content = getattr(candidates[0], "content", None)
+        if content is None:
+            return None
+        parts = getattr(content, "parts", None) or []
+        if not parts:
+            return None
+        part = parts[0]
+        text = getattr(part, "text", None) if part else None
+        return text.strip() if isinstance(text, str) and text.strip() else None
+
+    # Current stable Vertex models only (no retired gemini-1.5-*)
+    sdk_models = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001")
+    rest_models = ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001")
+    last_error: str | None = None
+
+    # 1) Vertex via Google GenAI SDK
     try:
         from google import genai
         client = genai.Client(vertexai=True, project=project, location=location)
-        for model_id in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-002"):
+        for model_id in sdk_models:
             try:
-                response = client.models.generate_content(
-                    model=model_id,
-                    contents=prompt,
-                )
-                if response is None:
-                    continue
-                text = getattr(response, "text", None) if response else None
-                if isinstance(text, str) and text.strip():
-                    return text.strip()
-            except Exception as model_err:
-                _log.info("Session summary: model %s failed: %s", model_id, model_err)
-                continue
-    except ImportError:
-        _log.info("Session summary: google-genai not installed, using REST")
+                response = client.models.generate_content(model=model_id, contents=prompt)
+                text = _extract_text(response)
+                if text:
+                    return text
+                last_error = f"Model {model_id} returned no text."
+            except Exception as e:
+                last_error = f"Vertex SDK ({model_id}): {e}"
+                _log.warning("Session summary: %s", last_error)
+    except ImportError as e:
+        last_error = f"google-genai not installed: {e}"
     except Exception as e:
-        _log.warning("Session summary: SDK failed: %s", e)
+        last_error = f"Vertex SDK init: {e}"
 
-    # Fallback: REST API with ADC
+    # 2) Vertex REST (v1beta1 then v1)
     try:
         import google.auth
         import google.auth.transport.requests
@@ -481,39 +527,54 @@ Conversation:
         if not creds.valid:
             creds.refresh(google.auth.transport.requests.Request())
         token = creds.token
-        url = f"https://{location}-aiplatform.googleapis.com/v1/projects/{quote(project, safe='')}/locations/{quote(location, safe='')}/publishers/google/models/gemini-1.5-flash:generateContent"
-        body = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},
-        }
-        req = Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        err = data.get("error")
-        if err:
-            _log.warning("Session summary: Vertex API error: %s", err.get("message") or err)
-            return _fallback
-        candidates = data.get("candidates") or []
-        if not candidates:
-            _log.warning("Session summary: Vertex API returned no candidates (e.g. safety block). Response keys: %s", list(data.keys()))
-            return _fallback
-        parts = (candidates[0].get("content") or {}).get("parts") or []
-        if not parts:
-            _log.warning("Session summary: Vertex API returned candidate with no parts")
-            return _fallback
-        text = (parts[0].get("text") or "").strip()
-        return text if text else _fallback
     except Exception as e:
-        _log.warning("Session summary generation failed: %s", e)
-        return _fallback
+        raise VertexSummaryError(f"Vertex auth failed: {e}") from e
+
+    for api_ver in ("v1beta1", "v1"):
+        for model_id in rest_models:
+            try:
+                url = f"https://{location}-aiplatform.googleapis.com/{api_ver}/projects/{quote(project, safe='')}/locations/{quote(location, safe='')}/publishers/google/models/{model_id}:generateContent"
+                body = {
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},
+                }
+                req = Request(
+                    url,
+                    data=json.dumps(body).encode("utf-8"),
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                err = data.get("error")
+                if err:
+                    msg = err.get("message") or err.get("status") or str(err)
+                    last_error = f"Vertex REST {api_ver} {model_id}: {msg}"
+                    continue
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    last_error = f"Vertex REST {api_ver} {model_id}: no candidates."
+                    continue
+                parts = (candidates[0].get("content") or {}).get("parts") or []
+                if not parts:
+                    continue
+                text = (parts[0].get("text") or "").strip()
+                if text:
+                    return text
+            except HTTPError as he:
+                try:
+                    err_body = he.read().decode("utf-8")
+                    err_data = json.loads(err_body) if err_body.strip() else {}
+                    msg = err_data.get("error", {}).get("message") or he.reason or str(he.code)
+                except Exception:
+                    msg = he.reason or str(he.code)
+                last_error = f"Vertex REST {api_ver} {model_id} HTTP {he.code}: {msg}"
+                _log.warning("Session summary: %s", last_error)
+            except Exception as e:
+                last_error = f"Vertex REST {api_ver} {model_id}: {e}"
+                _log.warning("Session summary: %s", last_error)
+
+    raise VertexSummaryError(last_error or "Vertex AI summarization failed. Enable Vertex AI API and grant Vertex AI User to the credential.")
 
 
 @app.post("/elders/{elder_id}/session-summary")
@@ -530,7 +591,10 @@ def session_summary(elder_id: str, body: SessionSummaryPayload):
     caretaker_email = (ec.get("email") or "").strip().lower() if isinstance(ec, dict) else ""
     caretaker_name = (ec.get("name") or "Caretaker").strip() if isinstance(ec, dict) else "Caretaker"
     transcript_data = [{"role": e.role, "text": e.text} for e in body.transcript]
-    summary = _summarize_transcript_for_caretaker(transcript_data)
+    try:
+        summary = _summarize_transcript_for_caretaker(transcript_data)
+    except VertexSummaryError as e:
+        raise HTTPException(status_code=503, detail=e.message) from e
 
     refill_block = ""
     if body.refill is not None:
@@ -559,12 +623,14 @@ def session_summary(elder_id: str, body: SessionSummaryPayload):
                 refill_block += line
 
     sent_to: str | None = None
+    # Return the same combined text we send in the email so the UI matches.
+    display_summary = (summary + refill_block).strip()
     if caretaker_email:
         subject = f"MedMate session summary for {display_name}"
-        body_text = f"Hello {caretaker_name},\n\nHere is a summary of the recent MedMate conversation with {display_name}:\n\n{summary}{refill_block}\n\n— MedMate"
+        body_text = f"Hello {caretaker_name},\n\nHere is a summary of the recent MedMate conversation with {display_name}:\n\n{display_summary}\n\n— MedMate"
         _send_email(caretaker_email, subject, body_text)
         sent_to = caretaker_email
-    return {"summary": summary, "sent_to": sent_to}
+    return {"summary": display_summary, "sent_to": sent_to}
 
 
 def _send_dose_notification_email(

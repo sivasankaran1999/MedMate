@@ -389,7 +389,7 @@ export default function Home() {
     setLoginError(null);
     setLoginLoading(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const res = await fetch(`${httpBase}/auth/login`, {
         method: "POST",
@@ -412,10 +412,13 @@ export default function Home() {
       setElderId(id);
       setDisplayName(name);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Login failed";
       if (err instanceof Error && err.name === "AbortError") {
-        setLoginError("Connection timed out. Is the backend running on port 8080? If yes, run backend/check_credentials.py (see LOCAL-DEV.md).");
+        setLoginError("Request timed out. Is the backend running on port 8080? Run: cd backend && uvicorn main:app --reload --port 8080. Then run backend/check_credentials.py (see LOCAL-DEV.md).");
+      } else if (msg === "Failed to fetch" || msg.includes("network") || msg.includes("Load failed")) {
+        setLoginError(`Cannot reach backend at ${httpBase}. Start it: cd backend && uvicorn main:app --reload --port 8080. If the app is at 127.0.0.1, set NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8080 in frontend/.env.local and restart the frontend.`);
       } else {
-        setLoginError(err instanceof Error ? err.message : "Login failed");
+        setLoginError(msg);
       }
     } finally {
       clearTimeout(timeoutId);

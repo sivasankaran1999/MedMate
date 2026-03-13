@@ -47,7 +47,12 @@ def main():
     print("\n3. Testing Firestore connection (timeout 15s)...")
     try:
         from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-        from google.cloud import firestore
+        try:
+            from google.cloud import firestore
+        except ImportError:
+            print("   FAILED: google-cloud-firestore not installed.")
+            print("   -> Fix: pip install google-cloud-firestore  (or: pip install -r backend/requirements.txt)\n")
+            return 1
 
         def _test():
             db = firestore.Client(project=project)
