@@ -7,8 +7,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application
-COPY main.py .
+# Application (main and all modules it imports at runtime)
+COPY main.py firestore_client.py live_session.py ./
 
 # Cloud Run expects PORT (default 8080)
 ENV PORT=8080

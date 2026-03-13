@@ -2,6 +2,8 @@
 
 Voice-first, vision-aware AI companion for elders: talk naturally, show pill or bottle anytime, interrupt anytime. Built for the [Gemini Live Agent Challenge](https://geminiliveagentchallenge.devpost.com/).
 
+**Hackathon compliance:** See **[HACKATHON_REQUIREMENTS.md](./HACKATHON_REQUIREMENTS.md)** for (1) Gemini model, (2) GenAI SDK / agent kit, (3) Google Cloud services, **proof of GCP deployment** (code links), and **bonus — automating Cloud Deployment** (link: **[scripts/](scripts/)** and **[backend/Dockerfile](backend/Dockerfile)**).
+
 ## Project context
 
 See **[PROJECT_BRIEF.md](./PROJECT_BRIEF.md)** for full idea, tech requirements, and submission checklist.
@@ -12,9 +14,9 @@ See **[TECH_STACK.md](./TECH_STACK.md)** and **[docs/architecture.md](./docs/arc
 
 | Layer     | Choice                          | Hackathon requirement   |
 |----------|----------------------------------|--------------------------|
-| **AI**   | Vertex AI **Gemini Live API**   | Gemini model + Live API ✓ |
+| **AI**   | Vertex AI **Gemini Live API** + **GenAI SDK** (summarization) | Gemini model ✓ · GenAI SDK ✓ |
 | **Backend** | **Cloud Run** (Python)       | GCP ✓                    |
-| **Data** | **Firestore** (per-elder schedule + users) | GCP ✓                 |
+| **Data** | **Firestore** (per-elder schedule + users) | Google Cloud ✓        |
 | **Frontend** | **Next.js** (web, mic + camera) | —                    |
 
 - **Voice + vision + barge-in** in one session; **per-elder** morning/afternoon/night schedule.
