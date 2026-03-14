@@ -12,6 +12,8 @@ env/
 .env
 .env.local
 backend/.env
+frontend/.env
+frontend/.env.local
 .env.*.local
 *.pem
 backend/service-account.json
