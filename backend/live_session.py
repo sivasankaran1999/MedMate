@@ -247,7 +247,7 @@ async def run_live_proxy(
     }
 
     try:
-        async with websockets.connect(url, extra_headers=headers) as vertex_ws:
+        async with websockets.connect(url, additional_headers=headers) as vertex_ws:
             await vertex_ws.send(json.dumps(setup_message))
 
             setup_complete_event = asyncio.Event()
