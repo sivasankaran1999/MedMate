@@ -191,6 +191,8 @@ From the repo root:
 ./scripts/deploy.sh YOUR_GCP_PROJECT_ID
 ```
 
+Example: `./scripts/deploy.sh project-8be520bb-b4ac-4d57-a37`
+
 This sets the project, builds the backend from `backend/` with Cloud Build, and deploys to Cloud Run with `GOOGLE_CLOUD_PROJECT` set. Note the Cloud Run URL (e.g. `https://medmate-backend-xxx.run.app`).
 
 **Caretaker emails:** The backend only sends session-summary and dose-notification emails when **SMTP is configured**. If the caretaker is not receiving emails, set these environment variables on your Cloud Run service:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy MedMate backend to Cloud Run.
 # Usage: ./scripts/deploy.sh [GCP_PROJECT_ID]
-# Requires: gcloud CLI, Docker (or use gcloud builds submit).
+# Requires: gcloud CLI (Cloud Build runs in GCP; no local Docker needed).
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
