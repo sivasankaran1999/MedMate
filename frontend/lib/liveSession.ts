@@ -5,8 +5,8 @@
 
 const SAMPLE_RATE_CAPTURE = 16000;
 const SAMPLE_RATE_PLAYBACK = 24000;
-/** Pre-buffer ~150ms before starting playback to avoid distorted first few words from the first chunk. */
-const MIN_PLAYBACK_BUFFER_MS = 150;
+/** Pre-buffer before starting playback to avoid distorted first few words (especially on first agent response). */
+const MIN_PLAYBACK_BUFFER_MS = 280;
 const MIN_PLAYBACK_BUFFER_SAMPLES = Math.round((SAMPLE_RATE_PLAYBACK * MIN_PLAYBACK_BUFFER_MS) / 1000);
 
 function float32ToPCM16(float32: Float32Array): ArrayBuffer {
@@ -361,11 +361,11 @@ export class LiveSession {
     if (float32.length === 0) return;
     this.turnPlaybackSamplesTotal += float32.length;
 
-    this.initPlayback().then(() => {
+    this.initPlayback().then(async () => {
       if (!this.playbackNode) return;
-      // Resume context in case it was suspended (avoids distorted first playback on some browsers)
+      // Must await resume—otherwise first playback can be choppy when context was suspended
       if (this.playbackContext?.state === "suspended") {
-        this.playbackContext.resume();
+        await this.playbackContext.resume();
       }
       if (this.playbackFlushed) {
         this.playbackNode.port.postMessage(float32);
@@ -388,6 +388,7 @@ export class LiveSession {
       sampleRate: SAMPLE_RATE_PLAYBACK,
     });
     this.playbackContext = ctx;
+    if (ctx.state === "suspended") await ctx.resume();
     await ctx.audioWorklet.addModule("/audio-processors/playback.worklet.js");
     this.playbackNode = new AudioWorkletNode(ctx, "pcm-processor");
     this.gainNode = ctx.createGain();
@@ -455,6 +456,13 @@ export class LiveSession {
 
     this.isCapturing = true;
     this.callbacks.onVoiceState?.("listening");
+
+    // Pre-warm playback context now (user gesture) so first agent response is clear
+    void this.initPlayback().then(async () => {
+      if (this.playbackContext?.state === "suspended") {
+        await this.playbackContext.resume();
+      }
+    });
   }
 
   stopMic(): void {
