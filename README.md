@@ -2,7 +2,22 @@
 
 Voice-first, vision-aware AI companion for elders: talk naturally, show pill or bottle anytime, interrupt anytime. Built for the [Gemini Live Agent Challenge](https://geminiliveagentchallenge.devpost.com/).
 
+
 **Hackathon:** Gemini model, GenAI SDK, and Google Cloud (Vertex AI, Firestore, Cloud Run). Deployment automation: **[scripts/](scripts/)** and **[backend/Dockerfile](backend/Dockerfile)**.
+
+## Hackathon Requirements Compliance
+
+MedMate satisfies all requirements of the [Gemini Live Agent Challenge](https://geminiliveagentchallenge.devpost.com/):
+
+- **Gemini model:** Vertex AI Gemini Live API (real-time voice + vision)
+- **GenAI SDK:** Used for session summarization and model interactions
+- **Google Cloud services:**
+  - Cloud Run (backend hosting)
+  - Firestore (user and medication schedule storage)
+  - Vertex AI (Gemini Live multimodal model)
+
+The backend is deployed on Google Cloud Run and uses Vertex AI Gemini Live for real-time voice and vision interaction.
+
 
 ## Project context
 
