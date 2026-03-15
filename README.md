@@ -40,6 +40,25 @@ See **[TECH_STACK.md](./TECH_STACK.md)** and **[docs/architecture.md](./docs/arc
 - All mandatory tech: Gemini, Live API, Google Cloud (Cloud Run + Firestore + Vertex AI).
 - **Database:** Firestore stores **elders** (schedule + time windows) and **users** (sign-in → elder). See **[docs/firestore-schema.md](./docs/firestore-schema.md)** for the full schema and hackathon alignment.
 
+## System Architecture
+
+![MedMate Architecture](docs/MedMate_Architecture.png)
+
+MedMate runs a **real-time multimodal agent pipeline**:
+
+1. **Frontend (Next.js)** captures microphone audio and camera images.
+2. The frontend streams data to the **Python backend on Cloud Run** via WebSockets.
+3. The backend proxies audio and images to **Vertex AI Gemini Live API** for real-time voice and vision reasoning.
+4. **Firestore** stores user profiles, medication schedules, and caregiver contacts.
+
+Architecture flow:
+
+Frontend (Next.js)  
+→ WebSocket  
+→ Cloud Run backend (FastAPI)  
+→ Vertex AI Gemini Live  
+→ Firestore (schedules + users)
+
 ---
 
 ## Spin-up (run locally)
