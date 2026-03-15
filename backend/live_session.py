@@ -270,7 +270,7 @@ async def run_live_proxy(
                                         for p in parts
                                     )
                                     if has_audio:
-                                        print("[MedMate] Audio in JSON (from binary frame): %d parts" % len(parts))
+                                        logger.debug("Audio in JSON (from binary frame): %d parts", len(parts))
                                 await client_ws.send_text(json.dumps(msg))
                             except (UnicodeDecodeError, json.JSONDecodeError):
                                 pass  # skip non-JSON binary
@@ -287,7 +287,7 @@ async def run_live_proxy(
                                     for p in parts
                                 )
                                 if has_audio:
-                                    print("[MedMate] Audio in JSON: %d parts" % len(parts))
+                                    logger.debug("Audio in JSON: %d parts", len(parts))
                             await client_ws.send_text(json.dumps(msg))
                 except (ConnectionClosed, Exception):
                     pass

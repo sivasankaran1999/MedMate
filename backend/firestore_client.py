@@ -10,7 +10,6 @@ Elders: collection "elders", document ID = elder ID.
 Users (sign-in): collection "users", document ID = normalized email (lowercase).
   - email: str, elder_id: str, display_name?: str, password: str (demo only; use hash in prod)
 """
-#test
 from __future__ import annotations
 
 import os

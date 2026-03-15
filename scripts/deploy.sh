@@ -27,11 +27,20 @@ gcloud config set project "$PROJECT_ID"
 
 # Build and deploy with Cloud Build (no local Docker required)
 cd "$BACKEND_DIR"
+ENV_VARS="GOOGLE_CLOUD_PROJECT=$PROJECT_ID"
+# Optional: pass SMTP so caretaker emails work (set in your shell before running this script)
+for v in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD FROM_EMAIL; do
+  if [ -n "${!v}" ]; then
+    ENV_VARS="$ENV_VARS,$v=${!v}"
+  fi
+done
+
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
   --region "$REGION" \
   --allow-unauthenticated \
-  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID" \
+  --set-env-vars "$ENV_VARS" \
   --port 8080
 
 echo "Done. Backend URL: $(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)' 2>/dev/null || true)"
+echo "Tip: If caretaker emails are not sent, set SMTP_HOST, SMTP_USER, SMTP_PASSWORD (and optionally SMTP_PORT, FROM_EMAIL) on this Cloud Run service (see README)."
