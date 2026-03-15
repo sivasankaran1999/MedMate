@@ -1453,7 +1453,7 @@ export default function Home() {
                     {isMicOn ? "Stop microphone" : "Start microphone"}
                   </button>
                   {cameraStream && (
-                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video max-h-48 flex items-center justify-center">
+                    <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black aspect-video min-h-[320px] flex items-center justify-center">
                       <video
                         ref={cameraVideoRef}
                         autoPlay
